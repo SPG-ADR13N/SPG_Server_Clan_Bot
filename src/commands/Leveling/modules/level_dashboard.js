@@ -42,7 +42,7 @@ function buildDashboardEmbed(cfg, guild) {
     const ignoredChannels = cfg.ignoredChannels ?? [];
     const ignoredRoles = cfg.ignoredRoles ?? [];
     const ignoredChValue = ignoredChannels.length > 0 ? ignoredChannels.map(id => `<#${id}>`).join(', ') : '`None`';
-    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => `<@&${id}>`).join(', ') : '`None`';
+    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => `<&${id}>`).join(', ') : '`None`';
 
     return new EmbedBuilder()
         .setTitle('📊 Leveling System Dashboard')
@@ -57,8 +57,8 @@ function buildDashboardEmbed(cfg, guild) {
             { name: '\u200B', value: '\u200B', inline: true },
             { name: '💬 Level-up Message', value: msgPreview, inline: false },
             { name: '🏆 Role Rewards', value: rewardsValue, inline: false },
-            { name: '\ud83d\udeab Ignored Channels', value: ignoredChValue, inline: true },
-            { name: '\ud83d\udeab Ignored Roles', value: ignoredRoValue, inline: true },
+            { name: '⛔ Ignored Channels', value: ignoredChValue, inline: true },
+            { name: '⛔ Ignored Roles', value: ignoredRoValue, inline: true },
         )
         .setFooter({ text: 'Dashboard closes after 10 minutes of inactivity' })
         .setTimestamp();
@@ -98,17 +98,17 @@ function buildSelectMenu(guildId) {
                 .setLabel('Remove Role Reward')
                 .setDescription('Remove a role reward from a specific level')
                 .setValue('role_reward_remove')
-                .setEmoji('\ud83d\uddd1\ufe0f'),
+                .setEmoji('🗑️'),
             new StringSelectMenuOptionBuilder()
                 .setLabel('Ignored Channels')
                 .setDescription('Toggle channels where XP will not be awarded')
                 .setValue('ignore_channels')
-                .setEmoji('\ud83d\udeab'),
+                .setEmoji('⛔'),
             new StringSelectMenuOptionBuilder()
                 .setLabel('Ignored Roles')
                 .setDescription('Toggle roles that will not receive XP')
                 .setValue('ignore_roles')
-                .setEmoji('\ud83d\udeab'),
+                .setEmoji('⛔'),
         );
 }
 
@@ -229,7 +229,6 @@ export default {
                 }
             });
 
-            // ── Button collector for the two toggle buttons ──────────────────
             const btnCollector = interaction.channel.createMessageComponentCollector({
                 componentType: ComponentType.Button,
                 filter: i =>
@@ -337,12 +336,13 @@ async function handleRoleRewardAdd(selectInteraction, rootInteraction, cfg, guil
         .setDescription('This role will be given when the user reaches the level')
         .setRoleSelectMenuComponent(roleSelect);
 
+    // FIX: Set MaxLength to 7 digits and update UI text to 1,000,000
     const levelInput = new TextInputBuilder()
         .setCustomId('reward_level')
-        .setLabel('Level required (1–500)')
+        .setLabel('Level required (1-1,000,000)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('10')
-        .setMaxLength(3)
+        .setPlaceholder('10000')
+        .setMaxLength(7)
         .setMinLength(1)
         .setRequired(true);
 
@@ -363,9 +363,10 @@ async function handleRoleRewardAdd(selectInteraction, rootInteraction, cfg, guil
     const rawLevel = submitted.fields.getTextInputValue('reward_level').trim();
     const level = parseInt(rawLevel, 10);
 
-    if (isNaN(level) || level < 1 || level > 500) {
+    // FIX: Changed verification logic bounds check to 1,000,000
+    if (isNaN(level) || level < 1 || level > 1000000) {
         await submitted.reply({
-            embeds: [errorEmbed('Invalid Level', 'Level must be a whole number between **1** and **500**.')],
+            embeds: [errorEmbed('Invalid Level', 'Level must be a whole number between **1** and **1,000,000**.')],
             flags: MessageFlags.Ephemeral,
         });
         return;
@@ -411,12 +412,13 @@ async function handleRoleRewardRemove(selectInteraction, rootInteraction, cfg, g
         .setValue(entries.map(([lvl, roleId]) => `Level ${lvl}: <@&${roleId}>`).join('\n'))
         .setRequired(false);
 
+    // FIX: Expanded MaxLength to 7 to handle removing large numbers
     const levelInput = new TextInputBuilder()
         .setCustomId('remove_level')
         .setLabel('Level to remove reward from')
         .setStyle(TextInputStyle.Short)
         .setValue(entries[0][0])
-        .setMaxLength(3)
+        .setMaxLength(7)
         .setMinLength(1)
         .setRequired(true);
 
@@ -463,7 +465,7 @@ async function handleRoleRewardRemove(selectInteraction, rootInteraction, cfg, g
 async function handleChannel(selectInteraction, rootInteraction, cfg, guildId, client) {
     const modal = new ModalBuilder()
         .setCustomId(`level_cfg_channel_modal_${guildId}`)
-        .setTitle('\ud83d\udce2 Change Level-up Channel');
+        .setTitle('📢 Change Level-up Channel');
 
     const channelSelect = new ChannelSelectMenuBuilder()
         .setCustomId('levelup_channel')
@@ -506,7 +508,7 @@ async function handleChannel(selectInteraction, rootInteraction, cfg, guildId, c
     await saveLevelingConfig(client, guildId, cfg);
 
     await submitted.reply({
-        embeds: [successEmbed('\u2705 Channel Updated', `Level-up notifications will now be sent in ${channel ?? `<#${channelId}>`}.`)],
+        embeds: [successEmbed('✅ Channel Updated', `Level-up notifications will now be sent in ${channel ?? `<#${channelId}>`}.`)],
         flags: MessageFlags.Ephemeral,
     });
 
@@ -518,7 +520,7 @@ async function handleChannel(selectInteraction, rootInteraction, cfg, guildId, c
 async function handleIgnoreChannels(selectInteraction, rootInteraction, cfg, guildId, client) {
     const modal = new ModalBuilder()
         .setCustomId(`level_cfg_ignore_channels_${guildId}`)
-        .setTitle('\ud83d\udeab Ignored Channels');
+        .setTitle('⛔ Ignored Channels');
 
     const channelSelect = new ChannelSelectMenuBuilder()
         .setCustomId('ignore_channel')
@@ -565,7 +567,7 @@ async function handleIgnoreChannels(selectInteraction, rootInteraction, cfg, gui
         : '`None`';
 
     await submitted.reply({
-        embeds: [successEmbed('\u2705 Ignored Channels Updated', `XP will not be awarded in: ${list}`)],
+        embeds: [successEmbed('✅ Ignored Channels Updated', `XP will not be awarded in: ${list}`)],
         flags: MessageFlags.Ephemeral,
     });
 
@@ -577,7 +579,7 @@ async function handleIgnoreChannels(selectInteraction, rootInteraction, cfg, gui
 async function handleIgnoreRoles(selectInteraction, rootInteraction, cfg, guildId, client) {
     const modal = new ModalBuilder()
         .setCustomId(`level_cfg_ignore_roles_${guildId}`)
-        .setTitle('\ud83d\udeab Ignored Roles');
+        .setTitle('⛔ Ignored Roles');
 
     const roleSelect = new RoleSelectMenuBuilder()
         .setCustomId('ignore_role')
@@ -623,7 +625,7 @@ async function handleIgnoreRoles(selectInteraction, rootInteraction, cfg, guildI
         : '`None`';
 
     await submitted.reply({
-        embeds: [successEmbed('\u2705 Ignored Roles Updated', `These roles will not earn XP: ${list}`)],
+        embeds: [successEmbed('✅ Ignored Roles Updated', `These roles will not earn XP: ${list}`)],
         flags: MessageFlags.Ephemeral,
     });
 
@@ -807,16 +809,13 @@ async function handleXpCooldown(selectInteraction, rootInteraction, cfg, guildId
 
     if (!submitted) return;
 
-    const raw = submitted.fields.getTextInputValue('cooldown_input').trim();
-    const newCooldown = parseInt(raw, 10);
+    const rawCooldown = submitted.fields.getTextInputValue('cooldown_input').trim();
+    const newCooldown = parseInt(rawCooldown, 10);
 
     if (isNaN(newCooldown) || newCooldown < 0 || newCooldown > 3600) {
         await submitted.reply({
             embeds: [
-                errorEmbed(
-                    'Invalid Value',
-                    'Cooldown must be a whole number between **0** and **3600** seconds.',
-                ),
+                errorEmbed('Invalid Cooldown', 'Cooldown must be a whole number between **0** and **3600** seconds.'),
             ],
             flags: MessageFlags.Ephemeral,
         });
@@ -830,7 +829,7 @@ async function handleXpCooldown(selectInteraction, rootInteraction, cfg, guildId
         embeds: [
             successEmbed(
                 '✅ Cooldown Updated',
-                `XP cooldown set to **${newCooldown} second${newCooldown !== 1 ? 's' : ''}**.${newCooldown === 0 ? '\n> ⚠️ A cooldown of 0 means XP is granted on every message.' : ''}`,
+                `XP cooldown set to **${newCooldown}** seconds.`,
             ),
         ],
         flags: MessageFlags.Ephemeral,
@@ -838,4 +837,3 @@ async function handleXpCooldown(selectInteraction, rootInteraction, cfg, guildId
 
     await refreshDashboard(rootInteraction, cfg, guildId);
 }
-
