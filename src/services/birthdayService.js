@@ -3,14 +3,7 @@ import { getGuildBirthdays, setBirthday as dbSetBirthday, deleteBirthday as dbDe
 import { logger } from '../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../utils/errorHandler.js';
 
-
-
-
-
-
-
 export function validateBirthday(month, day) {
-  
   if (typeof month !== 'number' || typeof day !== 'number') {
     return {
       isValid: false,
@@ -18,7 +11,6 @@ export function validateBirthday(month, day) {
     };
   }
 
-  
   if (month < 1 || month > 12) {
     return {
       isValid: false,
@@ -26,7 +18,6 @@ export function validateBirthday(month, day) {
     };
   }
 
-  
   if (day < 1 || day > 31) {
     return {
       isValid: false,
@@ -34,7 +25,6 @@ export function validateBirthday(month, day) {
     };
   }
 
-  
   const currentYear = new Date().getFullYear();
   const date = new Date(currentYear, month - 1, day);
   
@@ -48,18 +38,8 @@ export function validateBirthday(month, day) {
   return { isValid: true };
 }
 
-
-
-
-
-
-
-
-
-
-export async function setBirthday(client, guildId, userId, month, day) {
+export async function setBirthday(client, guildId, userId, month, day, timezone = 'UTC') {
   try {
-    
     const validation = validateBirthday(month, day);
     if (!validation.isValid) {
       logger.warn('Birthday validation failed', {
@@ -78,15 +58,15 @@ export async function setBirthday(client, guildId, userId, month, day) {
       );
     }
 
-    // Set birthday in database
-    const success = await dbSetBirthday(client, guildId, userId, month, day);
+    // Set birthday in database — passing timezone along as the 6th parameter
+    const success = await dbSetBirthday(client, guildId, userId, month, day, timezone);
     
     if (!success) {
       throw new TitanBotError(
         'Failed to save birthday to database',
         ErrorTypes.DATABASE,
         'Failed to set your birthday. Please try again later.',
-        { userId, guildId, month, day }
+        { userId, guildId, month, day, timezone }
       );
     }
 
@@ -95,6 +75,7 @@ export async function setBirthday(client, guildId, userId, month, day) {
       guildId,
       month,
       day,
+      timezone,
       monthName: getMonthName(month)
     });
 
@@ -103,6 +84,7 @@ export async function setBirthday(client, guildId, userId, month, day) {
       data: {
         month,
         day,
+        timezone,
         monthName: getMonthName(month)
       }
     };
@@ -113,19 +95,13 @@ export async function setBirthday(client, guildId, userId, month, day) {
       userId,
       guildId,
       month,
-      day
+      day,
+      timezone
     });
     
     throw error;
   }
 }
-
-
-
-
-
-
-
 
 export async function getUserBirthday(client, guildId, userId) {
   try {
@@ -139,6 +115,7 @@ export async function getUserBirthday(client, guildId, userId) {
     return {
       month: birthdayData.month,
       day: birthdayData.day,
+      timezone: birthdayData.timezone || 'UTC',
       monthName: getMonthName(birthdayData.month)
     };
   } catch (error) {
@@ -151,12 +128,6 @@ export async function getUserBirthday(client, guildId, userId) {
   }
 }
 
-
-
-
-
-
-
 export async function getAllBirthdays(client, guildId) {
   try {
     const birthdays = await getGuildBirthdays(client, guildId);
@@ -165,12 +136,12 @@ export async function getAllBirthdays(client, guildId) {
       return [];
     }
 
-    
     const sortedBirthdays = Object.entries(birthdays)
       .map(([userId, data]) => ({
         userId,
         month: data.month,
         day: data.day,
+        timezone: data.timezone || 'UTC',
         monthName: getMonthName(data.month)
       }))
       .sort((a, b) => {
@@ -188,16 +159,8 @@ export async function getAllBirthdays(client, guildId) {
   }
 }
 
-
-
-
-
-
-
-
 export async function deleteBirthday(client, guildId, userId) {
   try {
-    
     const birthday = await getUserBirthday(client, guildId, userId);
     
     if (!birthday) {
@@ -238,13 +201,6 @@ export async function deleteBirthday(client, guildId, userId) {
   }
 }
 
-
-
-
-
-
-
-
 export async function getUpcomingBirthdays(client, guildId, limit = 5) {
   try {
     const birthdays = await getGuildBirthdays(client, guildId);
@@ -261,7 +217,6 @@ export async function getUpcomingBirthdays(client, guildId, limit = 5) {
     for (const [userId, userData] of Object.entries(birthdays)) {
       let nextBirthday = new Date(currentYear, userData.month - 1, userData.day);
       
-      
       if (nextBirthday < today) {
         nextBirthday = new Date(currentYear + 1, userData.month - 1, userData.day);
       }
@@ -272,15 +227,14 @@ export async function getUpcomingBirthdays(client, guildId, limit = 5) {
         userId,
         month: userData.month,
         day: userData.day,
+        timezone: userData.timezone || 'UTC',
         monthName: getMonthName(userData.month),
         date: nextBirthday,
         daysUntil
       });
     }
 
-    
     upcomingBirthdays.sort((a, b) => a.daysUntil - b.daysUntil);
-    
     
     return upcomingBirthdays.slice(0, limit);
   } catch (error) {
@@ -292,12 +246,6 @@ export async function getUpcomingBirthdays(client, guildId, limit = 5) {
     throw error;
   }
 }
-
-
-
-
-
-
 
 export async function getTodaysBirthdays(client, guildId) {
   try {
@@ -314,6 +262,7 @@ export async function getTodaysBirthdays(client, guildId) {
           userId,
           month: userData.month,
           day: userData.day,
+          timezone: userData.timezone || 'UTC',
           monthName: getMonthName(userData.month)
         });
       }
@@ -328,10 +277,6 @@ export async function getTodaysBirthdays(client, guildId) {
     throw error;
   }
 }
-
-
-
-
 
 export async function checkBirthdays(client) {
   const today = new Date();
@@ -407,13 +352,10 @@ export async function checkBirthdays(client) {
             footer: { text: 'Birthday Bot' },
             timestamp: new Date()
           }]
-        });
+        } reply => null);
       }
     } catch (error) {
       logger.error(`Error processing birthdays for guild ${guildId}:`, error);
     }
   }
 }
-
-
-
