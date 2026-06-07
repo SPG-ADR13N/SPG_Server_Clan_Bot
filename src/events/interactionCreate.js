@@ -96,7 +96,6 @@ export default {
             }, interactionTraceContext));
           }
         } else if (interaction.isAutocomplete()) {
-          // Handle autocomplete interactions
           const focusedOption = interaction.options.getFocused(true);
           
           if (interaction.commandName === 'apply' && focusedOption.name === 'application') {
@@ -105,7 +104,6 @@ export default {
               const roles = await getApplicationRoles(client, interaction.guildId);
               const roleName = interaction.options.getString('application', false);
               
-              // Filter: only show enabled applications
               const filtered = roles.filter(role =>
                 role.enabled !== false && 
                 role.name.toLowerCase().startsWith(roleName?.toLowerCase() || '')
@@ -131,7 +129,6 @@ export default {
               const roles = await getApplicationRoles(client, interaction.guildId);
               const appName = interaction.options.getString('application', false);
               
-              // Show all applications (enabled and disabled), but mark disabled ones
               const filtered = roles.filter(role =>
                 role.name.toLowerCase().startsWith(appName?.toLowerCase() || '')
               );
@@ -163,12 +160,9 @@ export default {
                 return;
               }
               
-              // Filter out panels whose messages no longer exist
               const validPanels = [];
               for (const panel of panels) {
-                if (!panel.messageId || !panel.channelId) {
-                  continue;
-                }
+                if (!panel.messageId || !panel.channelId) continue;
                 
                 const channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
@@ -221,6 +215,22 @@ export default {
               });
               await interaction.respond([]);
             }
+          } else {
+            // NEW FALLBACK HANDLER: Forward all other autocompletes to command modules
+            try {
+              const command = client.commands.get(interaction.commandName);
+              if (command && command.autocomplete) {
+                await command.autocomplete(interaction);
+              } else {
+                await interaction.respond([]);
+              }
+            } catch (error) {
+              logger.error(`Error handling modular fallback autocomplete for /${interaction.commandName}:`, {
+                error: error.message,
+                guildId: interaction.guildId
+              });
+              await interaction.respond([]);
+            }
           }
         } else if (interaction.isButton()) {
           if (interaction.customId.startsWith('shared_todo_')) {
@@ -254,9 +264,7 @@ export default {
           const button = client.buttons.get(customId);
 
           if (!button) {
-            if (!interaction.customId.includes(':')) {
-              return;
-            }
+            if (!interaction.customId.includes(':')) return;
 
             throw createError(
               `No button handler found for ${customId}`,
@@ -280,12 +288,7 @@ export default {
           const selectMenu = client.selectMenus.get(customId);
 
           if (!selectMenu) {
-            if (!interaction.customId.includes(':')) {
-              // No registered handler and no ':' delimiter — this is an inline-collected
-              // select menu (e.g. ticket_config_<guildId>, jointocreate_config_<id>).
-              // Return silently so the existing MessageComponentCollector handles it.
-              return;
-            }
+            if (!interaction.customId.includes(':')) return;
 
             throw createError(
               `No select menu handler found for ${customId}`,
@@ -342,11 +345,7 @@ export default {
           const modal = client.modals.get(customId);
 
           if (!modal) {
-            if (!interaction.customId.includes(':')) {
-              // No registered handler and no ':' delimiter — this is an inline-awaited
-              // modal (e.g. via awaitModalSubmit). Return silently so the caller handles it.
-              return;
-            }
+            if (!interaction.customId.includes(':')) return;
 
             throw createError(
               `No modal handler found for ${customId}`,
