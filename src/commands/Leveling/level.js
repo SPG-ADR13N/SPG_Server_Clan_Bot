@@ -96,7 +96,7 @@ export default {
                 const xpMax = interaction.options.getInteger('xp_max') ?? 25;
                 const message =
                     interaction.options.getString('message') ??
-                    '{user} has leveled up to level {level}!';
+                    '{user} has reached a message count of {level}!';
                 const xpCooldown = interaction.options.getInteger('xp_cooldown') ?? 60;
 
                 if (xpMin > xpMax) {
