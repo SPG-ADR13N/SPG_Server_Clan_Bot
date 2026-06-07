@@ -352,7 +352,7 @@ export async function checkBirthdays(client) {
             footer: { text: 'Birthday Bot' },
             timestamp: new Date()
           }]
-        } reply => null);
+        });
       }
     } catch (error) {
       logger.error(`Error processing birthdays for guild ${guildId}:`, error);
