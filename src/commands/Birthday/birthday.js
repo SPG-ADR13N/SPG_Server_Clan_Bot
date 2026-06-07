@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, MessageFlags, ChannelType, PermissionFlagsBits } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { SlashCommandBuilder, MessageFlags, ChannelType } from 'discord.js';
+import { errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError } from '../../utils/errorHandler.js';
 
@@ -11,6 +11,15 @@ import nextBirthdays from './modules/next_birthdays.js';
 import birthdaySetchannel from './modules/birthday_setchannel.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+
+// Common global timezones for the autocomplete drop-down list
+const COMMON_TIMEZONES = [
+    'UTC', 'GMT',
+    'America/New_York', 'America/Los_Angeles', 'America/Chicago', 'America/Denver', 'America/Phoenix',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Rome', 'Europe/Madrid',
+    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Kolkata', 'Asia/Dubai',
+    'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland'
+];
 
 export default {
     data: new SlashCommandBuilder()
@@ -45,8 +54,9 @@ export default {
                 .addStringOption(option =>
                     option
                         .setName('timezone')
-                        .setDescription('The local timezone identifier (e.g. America/New_York, Europe/London)')
+                        .setDescription('Type to search for your local timezone')
                         .setRequired(false)
+                        .setAutocomplete(true) // Enables the search filter UI
                 )
         )
         .addSubcommand(subcommand =>
@@ -84,7 +94,7 @@ export default {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('setchannel')
-                .setDescription('Set or disable the channel for birthday announcements. (Manage Server required)')
+                .setDescription('Set or disable the channel for birthday announcements.')
                 .addChannelOption(option =>
                     option
                         .setName('channel')
@@ -93,6 +103,22 @@ export default {
                         .setRequired(false)
                 )
         ),
+
+    // This handles filtering the timezone list as you type inside Discord
+    async autocomplete(interaction) {
+        try {
+            const focusedValue = interaction.options.getFocused().toLowerCase();
+            const filtered = COMMON_TIMEZONES.filter(choice => 
+                choice.toLowerCase().includes(focusedValue)
+            ).slice(0, 25); // Discord supports up to 25 choices maximum
+
+            await interaction.respond(
+                filtered.map(choice => ({ name: choice, value: choice }))
+            );
+        } catch (error) {
+            logger.error('Timezone autocomplete generation failed', error);
+        }
+    },
 
     async execute(interaction, config, client) {
         try {
@@ -123,8 +149,7 @@ export default {
                 stack: error.stack,
                 userId: interaction.user.id,
                 guildId: interaction.guildId,
-                commandName: 'birthday',
-                subcommand: interaction.options.getSubcommand()
+                commandName: 'birthday'
             });
             await handleInteractionError(interaction, error, {
                 commandName: 'birthday',
