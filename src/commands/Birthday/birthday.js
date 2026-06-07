@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, MessageFlags, ChannelType } from 'discord.js';
+import { SlashCommandBuilder, MessageFlags, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError } from '../../utils/errorHandler.js';
@@ -11,6 +11,7 @@ import nextBirthdays from './modules/next_birthdays.js';
 import birthdaySetchannel from './modules/birthday_setchannel.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+
 export default {
     data: new SlashCommandBuilder()
         .setName('birthday')
@@ -18,7 +19,7 @@ export default {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('set')
-                .setDescription('Set your birthday')
+                .setDescription('Set a birthday (Admin or Self-service depending on config)')
                 .addIntegerOption(option =>
                     option
                         .setName('month')
@@ -34,6 +35,18 @@ export default {
                         .setRequired(true)
                         .setMinValue(1)
                         .setMaxValue(31)
+                )
+                .addUserOption(option =>
+                    option
+                        .setName('user')
+                        .setDescription('The user whose birthday to set (Admin Only)')
+                        .setRequired(false)
+                )
+                .addStringOption(option =>
+                    option
+                        .setName('timezone')
+                        .setDescription('The local timezone identifier (e.g. America/New_York, Europe/London)')
+                        .setRequired(false)
                 )
         )
         .addSubcommand(subcommand =>
@@ -55,7 +68,13 @@ export default {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('remove')
-                .setDescription('Remove your birthday')
+                .setDescription('Remove a birthday')
+                .addUserOption(option =>
+                    option
+                        .setName('user')
+                        .setDescription('The user whose birthday to remove (Admin Only)')
+                        .setRequired(false)
+                )
         )
         .addSubcommand(subcommand =>
             subcommand
@@ -114,5 +133,3 @@ export default {
         }
     }
 };
-
-
