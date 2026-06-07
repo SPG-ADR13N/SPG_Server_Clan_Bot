@@ -5,6 +5,9 @@ import { logger } from '../../../utils/logger.js';
 import { handleInteractionError } from '../../../utils/errorHandler.js';
 import { InteractionHelper } from '../../../utils/interactionHelper.js';
 
+// Hardcoded Birthday Role ID requested by the administrator
+const BIRTHDAY_ROLE_ID = '1406324485979766814';
+
 export default {
     async execute(interaction, config, client) {
         try {
@@ -35,11 +38,50 @@ export default {
                 });
             }
 
+            // 1. Save data into the database
             const result = await setBirthday(client, interaction.guildId, targetUser.id, month, day, timezone);
             
+            // 2. Instant Live Check: Is it their birthday right now in their selected timezone?
+            let assignedInstantly = false;
+            try {
+                // Determine target local date based on user's desired timezone string
+                const targetTimeStr = new Date().toLocaleString("en-US", { timeZone: timezone });
+                const localDateObj = new Date(targetTimeStr);
+                
+                const currentLocalMonth = localDateObj.getMonth() + 1;
+                const currentLocalDay = localDateObj.getDate();
+
+                if (month === currentLocalMonth && day === currentLocalDay) {
+                    const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+                    if (member) {
+                        // Give them the role right now
+                        await member.roles.add(BIRTHDAY_ROLE_ID, "Birthday set to today! Instant live assignment.");
+                        
+                        // Register them immediately into the tracking ledger so the cron sweeps it up at next midnight
+                        const trackingKey = `bday-role-tracking-${interaction.guildId}`;
+                        const trackingData = (await client.db.get(trackingKey)) || {};
+                        trackingData[targetUser.id] = true;
+                        await client.db.set(trackingKey, trackingData);
+                        
+                        assignedInstantly = true;
+                        logger.info(`Instantly assigned birthday role on registration for user ${targetUser.id}`);
+                    }
+                }
+            } catch (timezoneError) {
+                logger.error("Error evaluating instant birthday role assignment matching", {
+                    error: timezoneError.message,
+                    userId: targetUser.id
+                });
+            }
+
+            // 3. Assemble and send the completion response message
+            const notificationAppend = assignedInstantly 
+                ? `\n\n🎉 **Since that is today, the birthday role has been assigned instantly!**` 
+                : '';
+
             await InteractionHelper.safeEditReply(interaction, {
                 embeds: [successEmbed(
-                    `<@${targetUser.id}>'s birthday has been updated to **${result.data.monthName} ${result.data.day}** (${timezone})!`,
+                    `<@${targetUser.id}>'s birthday has been updated to **${result.data.monthName} ${result.data.day}** (${timezone})!${notificationAppend}`,
                     "Birthday Registered! 🎂"
                 )]
             });
