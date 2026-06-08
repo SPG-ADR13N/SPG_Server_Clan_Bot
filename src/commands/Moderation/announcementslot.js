@@ -1,23 +1,28 @@
-import { SlashCommandBuilder, PermissionFlagsBits, ChannelType } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { 
+    SlashCommandBuilder, 
+    PermissionFlagsBits, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle,
+    ComponentType
+} from 'discord.js';
+import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
-// Hardcoded map of your channel choices to their real Discord Channel IDs
 const CHANNEL_MAP = {
-    announcements: '1362470860933435473', // REPLACE WITH REAL CHANNEL ID
-    customs:       '1362472109695303850', // REPLACE WITH REAL CHANNEL ID
-    videos:        '1362496298594468040', // REPLACE WITH REAL CHANNEL ID
-    polls:         '1362473134518702092'  // REPLACE WITH REAL CHANNEL ID
+    announcements: '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    customs:       '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    videos:        '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    polls:         '123456789012345678'  // REPLACE WITH YOUR REAL CHANNEL ID
 };
 
 export default {
     data: new SlashCommandBuilder()
         .setName('announcementslot')
         .setDescription('Grants a user temporary permission to post in an announcement channel')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // Restricted to Admin/Staff
-        .addUserOption(option => 
-            option.setName('user').setDescription('The user to grant the slot to').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .addUserOption(option => option.setName('user').setDescription('The user to grant the slot to').setRequired(true))
         .addStringOption(option =>
             option.setName('channel')
                 .setDescription('The target announcement channel')
@@ -73,69 +78,128 @@ export default {
 
             if (!channel) {
                 return await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [errorEmbed('Channel Not Found', `Could not find config channel for **${channelKey}**. Verify configuration IDs.`)]
+                    embeds: [errorEmbed('Channel Not Found', `Could not find config channel for **${channelKey}**.`)]
                 });
             }
 
-            // Define permissions array based on selection
-            const permissionsToAllow = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.ViewChannel];
-            if (permType === 'message+ping') {
-                permissionsToAllow.push(PermissionFlagsBits.MentionEveryone);
-            }
-
-            // Apply override to target channel for this specific user
+            // Apply target channel overrides
             await channel.permissionOverwrites.edit(targetUser.id, {
                 SendMessages: true,
                 ViewChannel: true,
                 MentionEveryone: permType === 'message+ping' ? true : null
             }, { reason: `Announcement slot granted by ${interaction.user.tag}` });
 
-            // Calculate expiration epoch timestamp
             const expiresAt = Date.now() + (durationMinutes * 60 * 1000);
 
-            // Save tracker data context into database to remain crash-safe
+            // Construct the clean status embed layout
+            const embed = successEmbed(
+                `👤 **User:** <@${targetUser.id}>\n` +
+                `📺 **Channel:** <#${targetChannelId}>\n` +
+                `💬 **Limit:** ${maxMessages} message${maxMessages !== 1 ? 's' : ''}\n` +
+                `⏳ **Time Limit:** ${durationMinutes} minutes (Expires <t:${Math.floor(expiresAt / 1000)}:R>)\n` +
+                `🔑 **Permissions:** \`${permType}\`\n\n` +
+                `**Status:** 🟢 Active`,
+                'Slot Opened Successfully 🔓'
+            );
+
+            // Create the Emergency Abort Button Component
+            const abortButton = new ButtonBuilder()
+                .setCustomId(`abort_slot:${targetUser.id}:${targetChannelId}`)
+                .setLabel('🔒 Emergency Close')
+                .setStyle(ButtonStyle.Danger);
+
+            const row = new ActionRowBuilder().addComponents(abortButton);
+
+            const replyMessage = await InteractionHelper.safeEditReply(interaction, {
+                embeds: [embed],
+                components: [row]
+            });
+
             const dbKey = `announcement-slot:${interaction.guildId}:${targetChannelId}:${targetUser.id}`;
             const slotData = {
                 userId: targetUser.id,
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
+                commandChannelId: interaction.channelId,
+                interactionMessageId: replyMessage.id,
                 maxMessages,
                 currentCount: 0,
                 expiresAt,
-                permType
+                permType,
+                staffId: interaction.user.id
             };
+            
             await client.db.set(dbKey, slotData);
 
-            logger.info(`Announcement slot active: User ${targetUser.id} in ${channelKey} for ${maxMessages} msgs.`);
+            // Dynamic Collector to catch Emergency Abort button presses live
+            const collector = replyMessage.createMessageComponentCollector({
+                componentType: ComponentType.Button,
+                time: durationMinutes * 60 * 1000
+            });
 
-            await InteractionHelper.safeEditReply(interaction, {
-                embeds: [successEmbed(
-                    `Temporary posting slot successfully opened!\n\n` +
+            collector.on('collect', async btnInteraction => {
+                if (btnInteraction.customId !== `abort_slot:${targetUser.id}:${targetChannelId}`) return;
+
+                // Restrict button safety usage strictly to the staff member who invoked it
+                if (btnInteraction.user.id !== slotData.staffId) {
+                    return await btnInteraction.reply({
+                        content: '❌ Only the staff member who opened this slot can emergency close it.',
+                        ephemeral: true
+                    });
+                }
+
+                await btnInteraction.deferUpdate();
+                
+                // Pull fresh state to confirm it hasn't been closed by message limits already
+                const freshData = await client.db.get(dbKey);
+                if (!freshData) return;
+
+                await channel.permissionOverwrites.delete(targetUser.id, 'Slot manually aborted by staff.').catch(() => null);
+                await client.db.delete(dbKey);
+
+                const closedEmbed = successEmbed(
                     `👤 **User:** <@${targetUser.id}>\n` +
                     `📺 **Channel:** <#${targetChannelId}>\n` +
                     `💬 **Limit:** ${maxMessages} message${maxMessages !== 1 ? 's' : ''}\n` +
-                    `⏳ **Time Limit:** ${durationMinutes} minutes (Expires <t:${Math.floor(expiresAt / 1000)}:R>)\n` +
-                    `🔑 **Permissions:** \`${permType}\``,
-                    'Slot Opened Successfully 🔓'
-                )]
+                    `⏳ **Time Limit:** ${durationMinutes} minutes\n` +
+                    `🔑 **Permissions:** \`${permType}\`\n\n` +
+                    `**Status:** 🔴 Closed | Reason: Manually aborted by staff`,
+                    'Slot Closed 🔒'
+                ).setColor('#DD2E44');
+
+                await btnInteraction.editReply({ embeds: [closedEmbed], components: [] });
+                collector.stop();
             });
 
-            // Set background backup expiration safety timer
+            // Fallback Background Security Safety Timer
             setTimeout(async () => {
                 const currentData = await client.db.get(dbKey);
                 if (currentData) {
-                    // If ledger entry still exists, time expired before they spent all messages
                     await channel.permissionOverwrites.delete(targetUser.id, 'Announcement slot time expired.').catch(() => null);
                     await client.db.delete(dbKey);
-                    logger.info(`Announcement slot automatically expired for user ${targetUser.id} in channel ${targetChannelId}`);
+
+                    const expiredEmbed = successEmbed(
+                        `👤 **User:** <@${targetUser.id}>\n` +
+                        `📺 **Channel:** <#${targetChannelId}>\n` +
+                        `💬 **Limit:** ${maxMessages} message${maxMessages !== 1 ? 's' : ''}\n` +
+                        `⏳ **Time Limit:** ${durationMinutes} minutes\n` +
+                        `🔑 **Permissions:** \`${permType}\`\n\n` +
+                        `**Status:** 🔴 Closed | Reason: Slot expired`,
+                        'Slot Closed 🔒'
+                    ).setColor('#DD2E44');
+
+                    const cmdChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+                    if (cmdChannel) {
+                        const originalMsg = await cmdChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
+                        if (originalMsg) {
+                            await originalMsg.edit({ embeds: [expiredEmbed], components: [] }).catch(() => null);
+                        }
+                    }
                 }
             }, durationMinutes * 60 * 1000);
 
         } catch (error) {
             logger.error('Error executing announcementslot command', error);
-            await InteractionHelper.safeEditReply(interaction, {
-                embeds: [errorEmbed('Command Error', 'An unexpected execution failure occurred processing this request.')]
-            });
         }
     }
 };
