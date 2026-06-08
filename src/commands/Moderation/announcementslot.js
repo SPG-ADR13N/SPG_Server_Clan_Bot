@@ -11,10 +11,10 @@ import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
 const CHANNEL_MAP = {
-    announcements: '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
-    customs:       '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
-    videos:        '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
-    polls:         '123456789012345678'  // REPLACE WITH YOUR REAL CHANNEL ID
+    announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
+    customs:       '1362472109695303850', // REPLACE WITH YOUR REAL CHANNEL ID
+    videos:        '1362496298594468040', // REPLACE WITH YOUR REAL CHANNEL ID
+    polls:         '1362473134518702092'  // REPLACE WITH YOUR REAL CHANNEL ID
 };
 
 export default {
