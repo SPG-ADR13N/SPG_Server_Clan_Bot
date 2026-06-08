@@ -10,9 +10,6 @@ import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
-// Central memory map to track slots globally across both files without DB errors
-export const activeSlots = new Map();
-
 const CHANNEL_MAP = {
     announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
     customs:       '1362472109695303850', // REPLACE WITH YOUR REAL CHANNEL ID
@@ -70,6 +67,11 @@ export default {
         try {
             await InteractionHelper.safeDefer(interaction);
 
+            // Initialize global client storage map if it doesn't exist yet
+            if (!client.announcementSlots) {
+                client.announcementSlots = new Map();
+            }
+
             const targetUser = interaction.options.getUser('user');
             const channelKey = interaction.options.getString('channel');
             const maxMessages = interaction.options.getInteger('message_count');
@@ -85,7 +87,7 @@ export default {
                 });
             }
 
-            // Apply overrides
+            // Apply dynamic permission overrides to target channel
             await channel.permissionOverwrites.edit(targetUser.id, {
                 SendMessages: true,
                 ViewChannel: true,
@@ -116,13 +118,12 @@ export default {
                 components: [row]
             });
 
-            // Clean storage key structure
             const mapKey = `${interaction.guildId}-${targetChannelId}-${targetUser.id}`;
             
-            // Set background fallback timer reference
+            // Background Expiration Tracker
             const timeoutId = setTimeout(async () => {
-                if (activeSlots.has(mapKey)) {
-                    activeSlots.delete(mapKey);
+                if (client.announcementSlots.has(mapKey)) {
+                    client.announcementSlots.delete(mapKey);
 
                     await channel.permissionOverwrites.delete(targetUser.id, 'Announcement slot time expired.').catch(() => null);
 
@@ -140,8 +141,8 @@ export default {
                 }
             }, durationMinutes * 60 * 1000);
 
-            // Store the tracking state safely in our central Memory Map
-            activeSlots.set(mapKey, {
+            // Save state onto global shared client reference
+            client.announcementSlots.set(mapKey, {
                 userId: targetUser.id,
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
@@ -156,7 +157,7 @@ export default {
                 replyMessage
             });
 
-            // Create button collector
+            // Local inline button handler
             const collector = replyMessage.createMessageComponentCollector({
                 componentType: ComponentType.Button,
                 time: durationMinutes * 60 * 1000
@@ -172,12 +173,11 @@ export default {
 
                 await btnInteraction.deferUpdate();
                 
-                const currentSlot = activeSlots.get(mapKey);
+                const currentSlot = client.announcementSlots.get(mapKey);
                 if (!currentSlot) return;
 
-                // Stop the active background expiration timer
                 clearTimeout(currentSlot.timeoutId);
-                activeSlots.delete(mapKey);
+                client.announcementSlots.delete(mapKey);
 
                 await channel.permissionOverwrites.delete(targetUser.id, 'Slot manually aborted by staff.').catch(() => null);
 
