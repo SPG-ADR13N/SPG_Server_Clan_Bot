@@ -4,6 +4,7 @@ import { getLevelingConfig, getUserLevelData } from '../services/leveling.js';
 import { addXp } from '../services/xpSystem.js';
 import { checkRateLimit } from '../utils/rateLimiter.js';
 import { successEmbed } from '../utils/embeds.js';
+import { activeSlots } from '../commands/Moderation/announcementslot.js';
 
 const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 20;
 const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
@@ -14,10 +15,10 @@ export default {
     try {
       if (message.author.bot || !message.guild) return;
 
-      // 1. Run dynamic slot verification and live update tracking
+      // 1. Live check and update announcement slot rules
       await handleAnnouncementSlot(message, client);
 
-      // 2. Core server leveling operations
+      // 2. Core leveling framework logic
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
@@ -26,27 +27,30 @@ export default {
 };
 
 async function handleAnnouncementSlot(message, client) {
-  const dbKey = `announcement-slot:${message.guild.id}:${message.channel.id}:${message.author.id}`;
+  const mapKey = `${message.guild.id}-${message.channel.id}-${message.author.id}`;
   
   try {
-    const slotData = await client.db.get(dbKey);
-    if (!slotData) return;
+    // Check our central fast memory store directly
+    if (!activeSlots || !activeSlots.has(mapKey)) return;
+    const slotData = activeSlots.get(mapKey);
 
-    // Safety check for expired entries
+    // Dynamic fallback checks
     if (Date.now() > slotData.expiresAt) {
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot cleanup fallback expired.').catch(() => null);
-      await client.db.delete(dbKey);
+      clearTimeout(slotData.timeoutId);
+      activeSlots.delete(mapKey);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Fallback timer sweep.').catch(() => null);
       return;
     }
 
     slotData.currentCount += 1;
 
     if (slotData.currentCount >= slotData.maxMessages) {
-      // Limit reached! Remove overrides immediately
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot message limit achieved.').catch(() => null);
-      await client.db.delete(dbKey);
+      // Limit hit! Erase the timer tracker and wipe permissions instantly
+      clearTimeout(slotData.timeoutId);
+      activeSlots.delete(mapKey);
 
-      // Rebuild the display layout showing it closed due to limit completion
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot channel text limits completed.').catch(() => null);
+
       const finalEmbed = successEmbed(
         `👤 **User:** <@${slotData.userId}>\n` +
         `📺 **Channel:** <#${slotData.channelId}>\n` +
@@ -57,18 +61,15 @@ async function handleAnnouncementSlot(message, client) {
         'Slot Closed 🔒'
       ).setColor('#DD2E44');
 
-      // Locate the exact command channel and message to edit it in place
-      const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
-      if (commandChannel) {
-        const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
-        if (targetInteractionMessage) {
-          await targetInteractionMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
-        }
+      // Edit the original interaction message directly in place 
+      if (slotData.replyMessage) {
+        await slotData.replyMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
       }
       
-      logger.info(`Slot hit limit for user ${message.author.id}. Cleaned up and updated status embed embed panels.`);
+      logger.info(`Slot successfully completed and closed for user ${message.author.id}.`);
     } else {
-      await client.db.set(dbKey, slotData);
+      // Save data increment state back into our map
+      activeSlots.set(mapKey, slotData);
     }
   } catch (error) {
     logger.error('Error checking active announcement slot updates:', error);
