@@ -103,16 +103,19 @@ export default {
                 'Slot Opened Successfully 🔓'
             );
 
-            // Pass key identifiers inside custom ID string so the interaction routing handles it natively
-            const buttonCustomId = `closeslot:${interaction.guildId}:${targetChannelId}:${targetUser.id}`;
-
+            // CHANGED: Clean static ID matching your filename perfectly to stop framework database errors
             const abortButton = new ButtonBuilder()
-                .setCustomId(buttonCustomId)
+                .setCustomId('closeslot')
                 .setLabel('🔒 Emergency Close')
                 .setStyle(ButtonStyle.Danger);
 
             const row = new ActionRowBuilder().addComponents(abortButton);
-            const replyMessage = await InteractionHelper.safeEditReply(interaction, { embeds: [embed], components: [row] });
+            
+            await InteractionHelper.safeEditReply(interaction, { embeds: [embed], components: [row] });
+            
+            // Fetch the fully resolved reply straight from Discord to guarantee accurate message IDs
+            const replyMessage = await interaction.fetchReply().catch(() => null);
+            const savedMessageId = replyMessage ? replyMessage.id : null;
 
             const mapKey = `${interaction.guildId}-${targetChannelId}-${targetUser.id}`;
             
@@ -132,14 +135,18 @@ export default {
                         `🔑 **Permissions:** \`${permType}\`\n\n` +
                         `**Status:** 🔴 Closed | Reason: Slot expired`,
                         'Slot Closed 🔒'
-                    ).setColor('#DD2E44');
+                    );
+                    
+                    if (expiredEmbed.setColor) expiredEmbed.setColor('#DD2E44');
+                    else expiredEmbed.color = 14495300;
 
-                    // Fetch clean message references directly from API to guarantee embed update updates to red
-                    const cmdChannel = await client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
-                    if (cmdChannel) {
-                        const targetMsg = await cmdChannel.messages.fetch(activeSlot.interactionMessageId).catch(() => null);
-                        if (targetMsg) {
-                            await targetMsg.edit({ embeds: [expiredEmbed], components: [] }).catch(() => null);
+                    if (activeSlot.interactionMessageId) {
+                        const cmdChannel = await client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
+                        if (cmdChannel) {
+                            const targetMsg = await cmdChannel.messages.fetch(activeSlot.interactionMessageId).catch(() => null);
+                            if (targetMsg) {
+                                await targetMsg.edit({ embeds: [expiredEmbed], components: [] }).catch(() => null);
+                            }
                         }
                     }
                 }
@@ -150,7 +157,7 @@ export default {
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
                 commandChannelId: interaction.channelId,
-                interactionMessageId: replyMessage.id,
+                interactionMessageId: savedMessageId,
                 maxMessages,
                 durationMinutes,
                 currentCount: 0,
