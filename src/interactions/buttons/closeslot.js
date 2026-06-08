@@ -1,24 +1,37 @@
-import { successEmbed } from '../utils/embeds.js';
-import { logger } from '../utils/logger.js';
+import { successEmbed } from '../../utils/embeds.js';
+import { logger } from '../../utils/logger.js';
 
 export default {
     name: 'closeslot',
     async execute(interaction, config, client) {
         try {
-            // Unpack custom ID payload variables passed down from standard routing
-            const [, guildId, targetChannelId, targetUserId] = interaction.customId.split(':');
-            const mapKey = `${guildId}-${targetChannelId}-${targetUserId}`;
+            if (!client.announcementSlots) {
+                return await interaction.reply({
+                    content: '❌ No active announcements slots are being tracked.',
+                    ephemeral: true
+                });
+            }
 
-            if (!client.announcementSlots || !client.announcementSlots.has(mapKey)) {
+            // Look up the active slot by searching for the message ID that contains this button
+            let slotData = null;
+            let activeMapKey = null;
+
+            for (const [key, value] of client.announcementSlots.entries()) {
+                if (value.interactionMessageId === interaction.message.id) {
+                    slotData = value;
+                    activeMapKey = key;
+                    break;
+                }
+            }
+
+            if (!slotData) {
                 return await interaction.reply({
                     content: '❌ This slot configuration is no longer active or tracked.',
                     ephemeral: true
                 });
             }
 
-            const slotData = client.announcementSlots.get(mapKey);
-
-            // Access validation check
+            // Restrict closing privileges to the staff member who spawned the slot
             if (interaction.user.id !== slotData.staffId) {
                 return await interaction.reply({
                     content: '❌ Only the staff member who opened this slot can close it.',
@@ -26,15 +39,15 @@ export default {
                 });
             }
 
-            // Instantly acknowledge the interaction to completely prevent "This interaction failed" errors
+            // Acknowledge immediately to fulfill the framework lifecycle
             await interaction.deferUpdate().catch(() => null);
 
             clearTimeout(slotData.timeoutId);
-            client.announcementSlots.delete(mapKey);
+            client.announcementSlots.delete(activeMapKey);
 
-            const channel = await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
+            const channel = await interaction.guild.channels.fetch(slotData.channelId).catch(() => null);
             if (channel) {
-                await channel.permissionOverwrites.delete(targetUserId, 'Emergency closed by staff.').catch(() => null);
+                await channel.permissionOverwrites.delete(slotData.userId, 'Emergency closed by staff.').catch(() => null);
             }
 
             const closedEmbed = successEmbed(
@@ -45,19 +58,16 @@ export default {
                 `🔑 **Permissions:** \`${slotData.permType}\`\n\n` +
                 `**Status:** 🔴 Closed | Reason: Manually aborted by staff`,
                 'Slot Closed 🔒'
-            ).setColor('#DD2E44');
+            );
+            
+            if (closedEmbed.setColor) closedEmbed.setColor('#DD2E44');
+            else closedEmbed.color = 14495300;
 
-            // Force live update straight over API channels
-            const cmdChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
-            if (cmdChannel) {
-                const targetMsg = await cmdChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
-                if (targetMsg) {
-                    await targetMsg.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
-                }
-            }
+            // Direct API refresh edit to clear out buttons and set embed to red
+            await interaction.message.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
 
         } catch (error) {
-            logger.error('Error executing native button handler:', error);
+            logger.error('Error executing framework-native close slot button:', error);
         }
     }
 };
