@@ -57,14 +57,19 @@ async function handleAnnouncementSlot(message, client) {
         `🔑 **Permissions:** \`${slotData.permType}\`\n\n` +
         `**Status:** 🔴 Closed | Reason: Slot message limit reached`,
         'Slot Closed 🔒'
-      ).setColor('#DD2E44');
+      );
+      
+      if (finalEmbed.setColor) finalEmbed.setColor('#DD2E44');
+      else finalEmbed.color = 14495300;
 
-      // Fetch fresh clean object straight over active REST API parameters
-      const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
-      if (commandChannel) {
-        const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
-        if (targetInteractionMessage) {
-          await targetInteractionMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
+      // Fetch clean message object via fresh API lookup params to ensure it changes to red
+      if (slotData.interactionMessageId) {
+        const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+        if (commandChannel) {
+          const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
+          if (targetInteractionMessage) {
+            await targetInteractionMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
+          }
         }
       }
       
