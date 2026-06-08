@@ -3,22 +3,18 @@ import {
     PermissionFlagsBits, 
     ActionRowBuilder, 
     ButtonBuilder, 
-    ButtonStyle,
-    Events
+    ButtonStyle 
 } from 'discord.js';
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
 const CHANNEL_MAP = {
-    announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
-    customs:       '1362472109695303850', // REPLACE WITH YOUR REAL CHANNEL ID
-    videos:        '1362496298594468040', // REPLACE WITH YOUR REAL CHANNEL ID
-    polls:         '1362473134518702092'  // REPLACE WITH YOUR REAL CHANNEL ID
+    announcements: '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    customs:       '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    videos:        '123456789012345678', // REPLACE WITH YOUR REAL CHANNEL ID
+    polls:         '123456789012345678'  // REPLACE WITH YOUR REAL CHANNEL ID
 };
-
-// Global initialization flag to prevent duplicate event attachments on reload
-let isButtonListenerAttached = false;
 
 export default {
     data: new SlashCommandBuilder()
@@ -74,12 +70,6 @@ export default {
                 client.announcementSlots = new Map();
             }
 
-            // Hook into the central client event stream directly (bypasses local collectors)
-            if (!isButtonListenerAttached) {
-                setupGlobalButtonInterceptor(client);
-                isButtonListenerAttached = true;
-            }
-
             const targetUser = interaction.options.getUser('user');
             const channelKey = interaction.options.getString('channel');
             const maxMessages = interaction.options.getInteger('message_count');
@@ -95,7 +85,6 @@ export default {
                 });
             }
 
-            // Grant overrides
             await channel.permissionOverwrites.edit(targetUser.id, {
                 SendMessages: true,
                 ViewChannel: true,
@@ -114,8 +103,8 @@ export default {
                 'Slot Opened Successfully 🔓'
             );
 
-            // Encode data straight into the customId metadata string
-            const buttonCustomId = `eslot:${interaction.guildId}:${targetChannelId}:${targetUser.id}`;
+            // Pass key identifiers inside custom ID string so the interaction routing handles it natively
+            const buttonCustomId = `closeslot:${interaction.guildId}:${targetChannelId}:${targetUser.id}`;
 
             const abortButton = new ButtonBuilder()
                 .setCustomId(buttonCustomId)
@@ -145,7 +134,7 @@ export default {
                         'Slot Closed 🔒'
                     ).setColor('#DD2E44');
 
-                    // Fetch fresh instances from API to guarantee embed update
+                    // Fetch clean message references directly from API to guarantee embed update updates to red
                     const cmdChannel = await client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
                     if (cmdChannel) {
                         const targetMsg = await cmdChannel.messages.fetch(activeSlot.interactionMessageId).catch(() => null);
@@ -156,7 +145,6 @@ export default {
                 }
             }, durationMinutes * 60 * 1000);
 
-            // Store pure data strings instead of complex objects
             client.announcementSlots.set(mapKey, {
                 userId: targetUser.id,
                 channelId: targetChannelId,
@@ -177,60 +165,3 @@ export default {
         }
     }
 };
-
-function setupGlobalButtonInterceptor(client) {
-    client.on(Events.InteractionCreate, async btnInteraction => {
-        if (!btnInteraction.isButton()) return;
-        if (!btnInteraction.customId.startsWith('eslot:')) return;
-
-        try {
-            // Unpack customId payload data string
-            const [, guildId, targetChannelId, targetUserId] = btnInteraction.customId.split(':');
-            const mapKey = `${guildId}-${targetChannelId}-${targetUserId}`;
-
-            if (!client.announcementSlots || !client.announcementSlots.has(mapKey)) return;
-            const slotData = client.announcementSlots.get(mapKey);
-
-            // Restrict access exclusively to the staff author
-            if (btnInteraction.user.id !== slotData.staffId) {
-                return await btnInteraction.reply({
-                    content: '❌ Only the staff member who opened this slot can close it.',
-                    ephemeral: true
-                });
-            }
-
-            // Immediately acknowledge interaction to completely block "This interaction failed" errors
-            await btnInteraction.deferUpdate().catch(() => null);
-
-            clearTimeout(slotData.timeoutId);
-            client.announcementSlots.delete(mapKey);
-
-            const channel = await btnInteraction.guild.channels.fetch(targetChannelId).catch(() => null);
-            if (channel) {
-                await channel.permissionOverwrites.delete(targetUserId, 'Emergency closed by staff.').catch(() => null);
-            }
-
-            const closedEmbed = successEmbed(
-                `👤 **User:** <@${slotData.userId}>\n` +
-                `📺 **Channel:** <#${slotData.channelId}>\n` +
-                `💬 **Limit:** ${slotData.maxMessages} message${slotData.maxMessages !== 1 ? 's' : ''}\n` +
-                `⏳ **Time Limit:** ${slotData.durationMinutes} minutes\n` +
-                `🔑 **Permissions:** \`${slotData.permType}\`\n\n` +
-                `**Status:** 🔴 Closed | Reason: Manually aborted by staff`,
-                'Slot Closed 🔒'
-            ).setColor('#DD2E44');
-
-            // Force update via fresh API calls
-            const cmdChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
-            if (cmdChannel) {
-                const targetMsg = await cmdChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
-                if (targetMsg) {
-                    await targetMsg.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
-                }
-            }
-
-        } catch (error) {
-            logger.error('Error executing global emergency button interceptor handler:', error);
-        }
-    });
-}
