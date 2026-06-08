@@ -3,20 +3,23 @@ import { logger } from '../../utils/logger.js';
 
 export default {
     name: 'closeslot',
-    async execute(interaction, config, client) {
+    async execute(interaction) { // Framework argument layout independent
         try {
-            if (!client.announcementSlots) {
+            // Using native interaction.client to guarantee shared memory access
+            const slotsMap = interaction.client.announcementSlots;
+
+            if (!slotsMap || slotsMap.size === 0) {
                 return await interaction.reply({
-                    content: '❌ No active announcements slots are being tracked.',
+                    content: '❌ No active announcements slots are currently being tracked in memory.',
                     ephemeral: true
                 });
             }
 
-            // Look up the active slot by searching for the message ID that contains this button
+            // Look up the active slot by tracking the parent message containing this button
             let slotData = null;
             let activeMapKey = null;
 
-            for (const [key, value] of client.announcementSlots.entries()) {
+            for (const [key, value] of slotsMap.entries()) {
                 if (value.interactionMessageId === interaction.message.id) {
                     slotData = value;
                     activeMapKey = key;
@@ -31,7 +34,7 @@ export default {
                 });
             }
 
-            // Restrict closing privileges to the staff member who spawned the slot
+            // Restrict closing privileges to the staff member who opened the slot
             if (interaction.user.id !== slotData.staffId) {
                 return await interaction.reply({
                     content: '❌ Only the staff member who opened this slot can close it.',
@@ -39,11 +42,12 @@ export default {
                 });
             }
 
-            // Acknowledge immediately to fulfill the framework lifecycle
+            // Acknowledge interaction immediately
             await interaction.deferUpdate().catch(() => null);
 
+            // Clean up timers and map allocations
             clearTimeout(slotData.timeoutId);
-            client.announcementSlots.delete(activeMapKey);
+            slotsMap.delete(activeMapKey);
 
             const channel = await interaction.guild.channels.fetch(slotData.channelId).catch(() => null);
             if (channel) {
@@ -63,7 +67,7 @@ export default {
             if (closedEmbed.setColor) closedEmbed.setColor('#DD2E44');
             else closedEmbed.color = 14495300;
 
-            // Direct API refresh edit to clear out buttons and set embed to red
+            // Direct UI update: turns status red and wipes out the emergency button line
             await interaction.message.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
 
         } catch (error) {
