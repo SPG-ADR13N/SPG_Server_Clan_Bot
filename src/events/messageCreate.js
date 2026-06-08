@@ -10,33 +10,35 @@ const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
 
 export default {
   name: Events.MessageCreate,
-  async execute(message, client) {
+  async execute(message) {
     try {
       if (message.author.bot || !message.guild) return;
 
       // 1. Process active slot configurations
-      await handleAnnouncementSlot(message, client);
+      await handleAnnouncementSlot(message);
 
       // 2. Process leveling tracking milestones
-      await handleLeveling(message, client);
+      await handleLeveling(message);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
     }
   }
 };
 
-async function handleAnnouncementSlot(message, client) {
-  if (!client.announcementSlots) return;
+async function handleAnnouncementSlot(message) {
+  // Pull memory slots map directly using native message context properties
+  const globalSlots = message.client.announcementSlots;
+  if (!globalSlots) return;
 
   const mapKey = `${message.guild.id}-${message.channel.id}-${message.author.id}`;
   
   try {
-    if (!client.announcementSlots.has(mapKey)) return;
-    const slotData = client.announcementSlots.get(mapKey);
+    if (!globalSlots.has(mapKey)) return;
+    const slotData = globalSlots.get(mapKey);
 
     if (Date.now() > slotData.expiresAt) {
       clearTimeout(slotData.timeoutId);
-      client.announcementSlots.delete(mapKey);
+      globalSlots.delete(mapKey);
       await message.channel.permissionOverwrites.delete(message.author.id, 'Sweep expiration override.').catch(() => null);
       return;
     }
@@ -45,7 +47,7 @@ async function handleAnnouncementSlot(message, client) {
 
     if (slotData.currentCount >= slotData.maxMessages) {
       clearTimeout(slotData.timeoutId);
-      client.announcementSlots.delete(mapKey);
+      globalSlots.delete(mapKey);
 
       await message.channel.permissionOverwrites.delete(message.author.id, 'Slot target message volume reached.').catch(() => null);
 
@@ -62,9 +64,8 @@ async function handleAnnouncementSlot(message, client) {
       if (finalEmbed.setColor) finalEmbed.setColor('#DD2E44');
       else finalEmbed.color = 14495300;
 
-      // Fetch clean message object via fresh API lookup params to ensure it changes to red
       if (slotData.interactionMessageId) {
-        const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+        const commandChannel = await message.client.channels.fetch(slotData.commandChannelId).catch(() => null);
         if (commandChannel) {
           const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
           if (targetInteractionMessage) {
@@ -75,20 +76,20 @@ async function handleAnnouncementSlot(message, client) {
       
       logger.info(`Slot successfully fulfilled for user ${message.author.id}. Status tracker updated to closed.`);
     } else {
-      client.announcementSlots.set(mapKey, slotData);
+      globalSlots.set(mapKey, slotData);
     }
   } catch (error) {
     logger.error('Error executing automated message tracking update state sequence:', error);
   }
 }
 
-async function handleLeveling(message, client) {
+async function handleLeveling(message) {
   try {
     const rateLimitKey = `xp-event:${message.guild.id}:${message.author.id}`;
     const canProcess = await checkRateLimit(rateLimitKey, MESSAGE_XP_RATE_LIMIT_ATTEMPTS, MESSAGE_XP_RATE_LIMIT_WINDOW_MS);
     if (!canProcess) return;
 
-    const levelingConfig = await getLevelingConfig(client, message.guild.id);
+    const levelingConfig = await getLevelingConfig(message.client, message.guild.id);
     if (!levelingConfig?.enabled) return;
 
     if (levelingConfig.ignoredChannels?.includes(message.channel.id)) return;
@@ -103,7 +104,7 @@ async function handleLeveling(message, client) {
     if (levelingConfig.blacklistedUsers?.includes(message.author.id)) return;
     if (!message.content || message.content.trim().length === 0) return;
 
-    const userData = await getUserLevelData(client, message.guild.id, message.author.id);
+    const userData = await getUserLevelData(message.client, message.guild.id, message.author.id);
     const cooldownTime = levelingConfig.xpCooldown !== undefined ? levelingConfig.xpCooldown : 0;
     const now = Date.now();
     const timeSinceLastMessage = now - (userData.lastMessage || 0);
@@ -113,7 +114,7 @@ async function handleLeveling(message, client) {
     }
 
     const finalXP = 1;
-    const result = await addXp(client, message.guild, message.member, finalXP);
+    const result = await addXp(message.client, message.guild, message.member, finalXP);
     
     if (result.success && result.leveledUp) {
       logger.info(`${message.author.tag} progressed to message milestone level ${result.level}`);
