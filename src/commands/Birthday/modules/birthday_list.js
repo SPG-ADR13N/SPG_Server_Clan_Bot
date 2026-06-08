@@ -4,16 +4,14 @@ import { getAllBirthdays } from '../../../services/birthdayService.js';
 import { deleteBirthday } from '../../../utils/database.js';
 import { logger } from '../../../utils/logger.js';
 import { handleInteractionError } from '../../../utils/errorHandler.js';
-
 import { InteractionHelper } from '../../../utils/interactionHelper.js';
+
 export default {
     async execute(interaction, config, client) {
         try {
             await InteractionHelper.safeDefer(interaction);
 
             const guildId = interaction.guildId;
-            
-            
             const sortedBirthdays = await getAllBirthdays(client, guildId);
 
             if (sortedBirthdays.length === 0) {
@@ -45,7 +43,9 @@ export default {
                     continue;
                 }
                 displayIndex++;
-                birthdayList += `${displayIndex}. <@${birthday.userId}> - ${birthday.monthName} ${birthday.day}\n`;
+                
+                // --- CHANGED HERE: Added the timezone layout block ---
+                birthdayList += `${displayIndex}. <@${birthday.userId}> - ${birthday.monthName} ${birthday.day} (\`${birthday.timezone}\`)\n`;
             }
 
             // Clean up birthday entries for members who left the server
@@ -94,6 +94,3 @@ export default {
         }
     }
 };
-
-
-
