@@ -3,26 +3,23 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { Collection } from 'discord.js';
 import { logger } from '../utils/logger.js';
+// --- STEP 2 ADDITION: Import your toggles file ---
+import { CommandToggles } from '../config/command_toggles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-
-
-
-
 
 function getSubcommandInfo(commandData) {
     const subcommands = [];
     
     if (commandData.options) {
         for (const option of commandData.options) {
-if (option.type === 1) {
+            if (option.type === 1) {
                 subcommands.push(option.name);
-} else if (option.type === 2) {
+            } else if (option.type === 2) {
                 if (option.options) {
                     for (const subOption of option.options) {
-if (subOption.type === 1) {
+                        if (subOption.type === 1) {
                             subcommands.push(`${option.name}/${subOption.name}`);
                         }
                     }
@@ -33,12 +30,6 @@ if (subOption.type === 1) {
     
     return subcommands;
 }
-
-
-
-
-
-
 
 async function getAllFiles(directory, fileList = []) {
     const files = await fs.readdir(directory, { withFileTypes: true });
@@ -59,11 +50,6 @@ async function getAllFiles(directory, fileList = []) {
     return fileList;
 }
 
-
-
-
-
-
 export async function loadCommands(client) {
     client.commands = new Collection();
     const commandsPath = path.join(__dirname, '../commands');
@@ -80,6 +66,12 @@ export async function loadCommands(client) {
             const commandName = path.basename(filePath, '.js');
             const commandDir = path.dirname(filePath);
             const category = path.basename(commandDir);
+            
+            // --- STEP 2 ADDITION: Skip loading if disabled in configuration ---
+            if (CommandToggles[commandName] === false) {
+                logger.info(`🔒 [TOGGLE SWITCH] Skipping disabled command: /${commandName}`);
+                continue;
+            }
             
             const commandModule = await import(`file://${filePath}`);
             const command = commandModule.default || commandModule;
@@ -133,17 +125,11 @@ export async function loadCommands(client) {
     return client.commands;
 }
 
-
-
-
-
-
-
 export async function registerCommands(client, guildId) {
     try {
         const commands = [];
         let totalSubcommands = 0;
-const registeredNames = new Set();
+        const registeredNames = new Set();
         
         for (const command of client.commands.values()) {
             if (command.data && typeof command.data.toJSON === 'function') {
@@ -173,9 +159,7 @@ const registeredNames = new Set();
         const totalCommandsWithSubs = commands.length + totalSubcommands;
         
         if (guildId) {
-            
             logger.info(`Preparing to register ${totalCommandsWithSubs} commands for guild ${guildId}`);
-            
             logger.info('Validating commands before registration...');
             
             let validationErrors = [];
@@ -241,7 +225,6 @@ const registeredNames = new Set();
             logger.info('Command validation passed');
             
             const guild = await client.guilds.fetch(guildId);
-            
             const existingCommands = await guild.commands.fetch();
             logger.info(`Found ${existingCommands.size} existing guild commands`);
             
@@ -296,12 +279,6 @@ const registeredNames = new Set();
     }
 }
 
-
-
-
-
-
-
 export async function reloadCommand(client, commandName) {
     const command = client.commands.get(commandName);
     
@@ -325,5 +302,3 @@ export async function reloadCommand(client, commandName) {
         return { success: false, message: `Error reloading command: ${error.message}` };
     }
 }
-
-
