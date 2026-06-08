@@ -3,8 +3,8 @@ import { logger } from '../utils/logger.js';
 import { getLevelingConfig, getUserLevelData } from '../services/leveling.js';
 import { addXp } from '../services/xpSystem.js';
 import { checkRateLimit } from '../utils/rateLimiter.js';
+import { successEmbed } from '../utils/embeds.js';
 
-// Global rapid-spam safety gate to protect your bot from crashing under API flood pressure
 const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 20;
 const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
 
@@ -12,13 +12,12 @@ export default {
   name: Events.MessageCreate,
   async execute(message, client) {
     try {
-      // Skip bots and non-guild messages completely
       if (message.author.bot || !message.guild) return;
 
-      // 1. Process the Announcement Slot Counter logic
+      // 1. Run dynamic slot verification and live update tracking
       await handleAnnouncementSlot(message, client);
 
-      // 2. Process your existing leveling system logic
+      // 2. Core server leveling operations
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
@@ -30,43 +29,54 @@ async function handleAnnouncementSlot(message, client) {
   const dbKey = `announcement-slot:${message.guild.id}:${message.channel.id}:${message.author.id}`;
   
   try {
-    // Check ledger database for an active temporary slot configuration
     const slotData = await client.db.get(dbKey);
-    if (!slotData) return; // User does not have a dynamic override set here, skip
+    if (!slotData) return;
 
-    // Safety expiration check (in case the timer didn't catch it during downtime)
+    // Safety check for expired entries
     if (Date.now() > slotData.expiresAt) {
       await message.channel.permissionOverwrites.delete(message.author.id, 'Slot cleanup fallback expired.').catch(() => null);
       await client.db.delete(dbKey);
       return;
     }
 
-    // Increment processed usage count
     slotData.currentCount += 1;
 
     if (slotData.currentCount >= slotData.maxMessages) {
-      // Limit hit! Instantly revoke overrides immediately
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Announcement slot limit reached. Permissions revoked.').catch(() => null);
+      // Limit reached! Remove overrides immediately
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot message limit achieved.').catch(() => null);
       await client.db.delete(dbKey);
-      logger.info(`User ${message.author.id} reached message limit (${slotData.maxMessages}) in channel ${message.channel.id}. Revoked permissions.`);
+
+      // Rebuild the display layout showing it closed due to limit completion
+      const finalEmbed = successEmbed(
+        `👤 **User:** <@${slotData.userId}>\n` +
+        `📺 **Channel:** <#${slotData.channelId}>\n` +
+        `💬 **Limit:** ${slotData.maxMessages} message${slotData.maxMessages !== 1 ? 's' : ''}\n` +
+        `⏳ **Time Limit:** Out of execution window\n` +
+        `🔑 **Permissions:** \`${slotData.permType}\`\n\n` +
+        `**Status:** 🔴 Closed | Reason: Slot message limit reached`,
+        'Slot Closed 🔒'
+      ).setColor('#DD2E44');
+
+      // Locate the exact command channel and message to edit it in place
+      const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+      if (commandChannel) {
+        const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
+        if (targetInteractionMessage) {
+          await targetInteractionMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
+        }
+      }
       
-      // Send a temporary clean confirmation notice
-      await message.reply({ content: '🔒 **Slot limit reached.** Your temporary posting privileges have been securely closed.' }).then(msg => {
-        setTimeout(() => msg.delete().catch(() => null), 60000);
-      }).catch(() => null);
+      logger.info(`Slot hit limit for user ${message.author.id}. Cleaned up and updated status embed embed panels.`);
     } else {
-      // Update data counter in the database
       await client.db.set(dbKey, slotData);
-      logger.info(`User ${message.author.id} posted message ${slotData.currentCount}/${slotData.maxMessages} in announcement slot.`);
     }
   } catch (error) {
-    logger.error('Error handling announcement slot verification tracking:', error);
+    logger.error('Error checking active announcement slot updates:', error);
   }
 }
 
 async function handleLeveling(message, client) {
   try {
-    // Basic structural rate limiter to protect database operations
     const rateLimitKey = `xp-event:${message.guild.id}:${message.author.id}`;
     const canProcess = await checkRateLimit(rateLimitKey, MESSAGE_XP_RATE_LIMIT_ATTEMPTS, MESSAGE_XP_RATE_LIMIT_WINDOW_MS);
     if (!canProcess) return;
@@ -74,10 +84,8 @@ async function handleLeveling(message, client) {
     const levelingConfig = await getLevelingConfig(client, message.guild.id);
     if (!levelingConfig?.enabled) return;
 
-    // Filter out restricted environments
     if (levelingConfig.ignoredChannels?.includes(message.channel.id)) return;
 
-    // Filter out restricted administrative roles
     if (levelingConfig.ignoredRoles?.length > 0) {
       const member = await message.guild.members.fetch(message.author.id).catch(() => null);
       if (member && member.roles.cache.some(role => levelingConfig.ignoredRoles.includes(role.id))) {
@@ -85,15 +93,10 @@ async function handleLeveling(message, client) {
       }
     }
 
-    // Filter out banned actors
     if (levelingConfig.blacklistedUsers?.includes(message.author.id)) return;
-
-    // Avoid empty content triggers (like embed-only systems, images, attachments)
     if (!message.content || message.content.trim().length === 0) return;
 
     const userData = await getUserLevelData(client, message.guild.id, message.author.id);
-    
-    // FIX 1: Safely accept '0' as a valid configuration value without falling back to 60 seconds
     const cooldownTime = levelingConfig.xpCooldown !== undefined ? levelingConfig.xpCooldown : 0;
     const now = Date.now();
     const timeSinceLastMessage = now - (userData.lastMessage || 0);
@@ -102,16 +105,11 @@ async function handleLeveling(message, client) {
       return;
     }
 
-    // FIX 2: Strict 1:1 payout alignment. 
-    // Every single valid message processes exactly 1 XP block (= 1 Level)
     const finalXP = 1;
-
     const result = await addXp(client, message.guild, message.member, finalXP);
     
     if (result.success && result.leveledUp) {
-      logger.info(
-        `${message.author.tag} progressed to message milestone level ${result.level} in ${message.guild.name}`
-      );
+      logger.info(`${message.author.tag} progressed to message milestone level ${result.level}`);
     }
   } catch (error) {
     logger.error('Error handling leveling for message:', error);
