@@ -9,11 +9,12 @@ import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 
+// Pre-loaded with your exact production channel IDs
 const CHANNEL_MAP = {
-    announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
-    customs:       '1362472109695303850', // REPLACE WITH YOUR REAL CHANNEL ID
-    videos:        '1362496298594468040', // REPLACE WITH YOUR REAL CHANNEL ID
-    polls:         '1362473134518702092'  // REPLACE WITH YOUR REAL CHANNEL ID
+    announcements: '1362470860933435473',
+    videos:        '1362496298594468040',
+    polls:         '1362473134518702092',
+    customs:       '1362472109695303850'
 };
 
 export default {
@@ -62,12 +63,13 @@ export default {
                     { name: 'message+ping', value: 'message+ping' }
                 )),
 
-    async execute(interaction, config, client) {
+    async execute(interaction) {
         try {
             await InteractionHelper.safeDefer(interaction);
 
-            if (!client.announcementSlots) {
-                client.announcementSlots = new Map();
+            // Access shared runtime memory map natively via the interaction's client property
+            if (!interaction.client.announcementSlots) {
+                interaction.client.announcementSlots = new Map();
             }
 
             const targetUser = interaction.options.getUser('user');
@@ -81,7 +83,7 @@ export default {
 
             if (!channel) {
                 return await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [errorEmbed('Channel Not Found', `Could not find config channel for **${channelKey}**.`)]
+                    embeds: [errorEmbed('Channel Not Found', `Could not find configuration matching **${channelKey}**.`)]
                 });
             }
 
@@ -103,7 +105,6 @@ export default {
                 'Slot Opened Successfully 🔓'
             );
 
-            // CHANGED: Clean static ID matching your filename perfectly to stop framework database errors
             const abortButton = new ButtonBuilder()
                 .setCustomId('closeslot')
                 .setLabel('🔒 Emergency Close')
@@ -113,17 +114,18 @@ export default {
             
             await InteractionHelper.safeEditReply(interaction, { embeds: [embed], components: [row] });
             
-            // Fetch the fully resolved reply straight from Discord to guarantee accurate message IDs
+            // Explicit lookup to capture exact system generated message id values
             const replyMessage = await interaction.fetchReply().catch(() => null);
             const savedMessageId = replyMessage ? replyMessage.id : null;
 
             const mapKey = `${interaction.guildId}-${targetChannelId}-${targetUser.id}`;
             
-            // Background Expiration Tracker
+            // Standard Background Expiration Tracker
             const timeoutId = setTimeout(async () => {
-                if (client.announcementSlots && client.announcementSlots.has(mapKey)) {
-                    const activeSlot = client.announcementSlots.get(mapKey);
-                    client.announcementSlots.delete(mapKey);
+                const globalSlots = interaction.client.announcementSlots;
+                if (globalSlots && globalSlots.has(mapKey)) {
+                    const activeSlot = globalSlots.get(mapKey);
+                    globalSlots.delete(mapKey);
 
                     await channel.permissionOverwrites.delete(targetUser.id, 'Announcement slot time expired.').catch(() => null);
 
@@ -141,7 +143,7 @@ export default {
                     else expiredEmbed.color = 14495300;
 
                     if (activeSlot.interactionMessageId) {
-                        const cmdChannel = await client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
+                        const cmdChannel = await interaction.client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
                         if (cmdChannel) {
                             const targetMsg = await cmdChannel.messages.fetch(activeSlot.interactionMessageId).catch(() => null);
                             if (targetMsg) {
@@ -152,7 +154,7 @@ export default {
                 }
             }, durationMinutes * 60 * 1000);
 
-            client.announcementSlots.set(mapKey, {
+            interaction.client.announcementSlots.set(mapKey, {
                 userId: targetUser.id,
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
