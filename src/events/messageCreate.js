@@ -12,14 +12,57 @@ export default {
   name: Events.MessageCreate,
   async execute(message, client) {
     try {
+      // Skip bots and non-guild messages completely
       if (message.author.bot || !message.guild) return;
 
+      // 1. Process the Announcement Slot Counter logic
+      await handleAnnouncementSlot(message, client);
+
+      // 2. Process your existing leveling system logic
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
     }
   }
 };
+
+async function handleAnnouncementSlot(message, client) {
+  const dbKey = `announcement-slot:${message.guild.id}:${message.channel.id}:${message.author.id}`;
+  
+  try {
+    // Check ledger database for an active temporary slot configuration
+    const slotData = await client.db.get(dbKey);
+    if (!slotData) return; // User does not have a dynamic override set here, skip
+
+    // Safety expiration check (in case the timer didn't catch it during downtime)
+    if (Date.now() > slotData.expiresAt) {
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot cleanup fallback expired.').catch(() => null);
+      await client.db.delete(dbKey);
+      return;
+    }
+
+    // Increment processed usage count
+    slotData.currentCount += 1;
+
+    if (slotData.currentCount >= slotData.maxMessages) {
+      // Limit hit! Instantly revoke overrides immediately
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Announcement slot limit reached. Permissions revoked.').catch(() => null);
+      await client.db.delete(dbKey);
+      logger.info(`User ${message.author.id} reached message limit (${slotData.maxMessages}) in channel ${message.channel.id}. Revoked permissions.`);
+      
+      // Send a temporary clean confirmation notice
+      await message.reply({ content: '🔒 **Slot limit reached.** Your temporary posting privileges have been securely closed.' }).then(msg => {
+        setTimeout(() => msg.delete().catch(() => null), 60000);
+      }).catch(() => null);
+    } else {
+      // Update data counter in the database
+      await client.db.set(dbKey, slotData);
+      logger.info(`User ${message.author.id} posted message ${slotData.currentCount}/${slotData.maxMessages} in announcement slot.`);
+    }
+  } catch (error) {
+    logger.error('Error handling announcement slot verification tracking:', error);
+  }
+}
 
 async function handleLeveling(message, client) {
   try {
