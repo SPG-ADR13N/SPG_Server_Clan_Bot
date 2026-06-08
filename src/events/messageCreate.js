@@ -14,10 +14,10 @@ export default {
     try {
       if (message.author.bot || !message.guild) return;
 
-      // 1. Process announcement slots tracking via clean client memory map
+      // 1. Process active slot configurations
       await handleAnnouncementSlot(message, client);
 
-      // 2. Process core server message milestones leveling
+      // 2. Process leveling tracking milestones
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
@@ -37,7 +37,7 @@ async function handleAnnouncementSlot(message, client) {
     if (Date.now() > slotData.expiresAt) {
       clearTimeout(slotData.timeoutId);
       client.announcementSlots.delete(mapKey);
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Backup check cleanup sweep.').catch(() => null);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Sweep expiration override.').catch(() => null);
       return;
     }
 
@@ -47,7 +47,7 @@ async function handleAnnouncementSlot(message, client) {
       clearTimeout(slotData.timeoutId);
       client.announcementSlots.delete(mapKey);
 
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Target message limits met.').catch(() => null);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot target message volume reached.').catch(() => null);
 
       const finalEmbed = successEmbed(
         `👤 **User:** <@${slotData.userId}>\n` +
@@ -59,7 +59,7 @@ async function handleAnnouncementSlot(message, client) {
         'Slot Closed 🔒'
       ).setColor('#DD2E44');
 
-      // Fetch fresh instances from the API to guarantee embed update on limit reached
+      // Fetch fresh clean object straight over active REST API parameters
       const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
       if (commandChannel) {
         const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
@@ -68,12 +68,12 @@ async function handleAnnouncementSlot(message, client) {
         }
       }
       
-      logger.info(`Slot fulfilled for user ${message.author.id}. Managed text update panel complete.`);
+      logger.info(`Slot successfully fulfilled for user ${message.author.id}. Status tracker updated to closed.`);
     } else {
       client.announcementSlots.set(mapKey, slotData);
     }
   } catch (error) {
-    logger.error('Error executing slot clean state management logic:', error);
+    logger.error('Error executing automated message tracking update state sequence:', error);
   }
 }
 
