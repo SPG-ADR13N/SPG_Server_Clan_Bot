@@ -131,86 +131,65 @@ export async function getUpcomingBirthdays(client, guildId, limit = 5) {
   }
 }
 
-export async function getTodaysBirthdays(client, guildId) {
-  try {
-    const birthdays = await getGuildBirthdays(client, guildId);
-    const today = new Date();
-    const currentMonth = today.getUTCMonth() + 1;
-    const currentDay = today.getUTCDate();
-    const todaysBirthdays = [];
-
-    for (const [userId, userData] of Object.entries(birthdays)) {
-      if (userData.month === currentMonth && userData.day === currentDay) {
-        todaysBirthdays.push({
-          userId,
-          month: userData.month,
-          day: userData.day,
-          timezone: userData.timezone || 'UTC'
-        });
-      }
-    }
-    return todaysBirthdays;
-  } catch (error) {
-    throw error;
-  }
-}
-
-// THE AUTOMATED TIME CLOCK LOOP (Runs daily at midnight UTC)
+// AUTOMATED CRON SCHEDULER ENGINE (Run this inside your ready.js setInterval loop every 30 mins)
 export async function checkBirthdays(client) {
-  const today = new Date();
-  const currentMonth = today.getUTCMonth() + 1;
-  const currentDay = today.getUTCDate();
-
-  logger.info(`🎂 Running daily birthday role manager check for UTC: ${currentMonth}/${currentDay}.`);
+  const now = new Date();
+  logger.info(`🎂 Running timezone-aware birthday check loop.`);
 
   for (const [guildId, guild] of client.guilds.cache) {
     try {
-      // 1. RECOVERY/EXPIRATION PHASE: Grab the tracking record from yesterday
       const trackingKey = `bday-role-tracking-${guildId}`;
       const trackingData = (await client.db.get(trackingKey)) || {};
       const updatedTrackingData = { ...trackingData };
-      
-      // Strip the role from anyone who had a birthday yesterday
-      for (const userId of Object.keys(trackingData)) {
-        try {
-          const member = await guild.members.fetch(userId).catch(() => null);
-          if (member && member.roles.cache.has(BIRTHDAY_ROLE_ID)) {
-            await member.roles.remove(BIRTHDAY_ROLE_ID, "Birthday role duration expired (24h completed)");
-            logger.info(`Removed birthday role from expired user ${userId}`);
-          }
-          delete updatedTrackingData[userId];
-        } catch (error) {
-           logger.error(`Error removing expired birthday role from ${userId}:`, error);
-        }
-      }
 
-      // 2. ASSIGNMENT PHASE: Find everyone who has a birthday right now
       const birthdaysKey = `birthdays:${guildId}`;
       const birthdays = (await client.db.get(birthdaysKey)) || {};
 
       for (const [userId, userData] of Object.entries(birthdays)) {
-        if (userData.month === currentMonth && userData.day === currentDay) {
-          const member = await guild.members.fetch(userId).catch(() => null);
-          
-          if (member) {
-            try {
-              // Give them the role
-              await member.roles.add(BIRTHDAY_ROLE_ID, "Happy Birthday! Role assigned for 24 hours.");
-              // Add them to tracking so they get stripped exactly 24 hours from now
+        const userTimezone = userData.timezone || 'UTC';
+        
+        try {
+          // Compute the current target month and day localized strictly to this specific user's zone setting
+          const formatter = new Intl.DateTimeFormat('en-US', {
+              timeZone: userTimezone,
+              month: 'numeric',
+              day: 'numeric'
+          });
+          const parts = formatter.formatToParts(now);
+          const currentLocalMonth = parseInt(parts.find(p => p.type === 'month').value, 10);
+          const currentLocalDay = parseInt(parts.find(p => p.type === 'day').value, 10);
+
+          const isCurrentlyBirthday = (userData.month === currentLocalMonth && userData.day === currentLocalDay);
+
+          // Phase A: Give role if local midnight hits and they don't have it tracked yet
+          if (isCurrentlyBirthday && !trackingData[userId]) {
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (member) {
+              await member.roles.add(BIRTHDAY_ROLE_ID, `Birthday started in local timezone: ${userTimezone}.`);
               updatedTrackingData[userId] = true;
-              logger.info(`Successfully added birthday role to ${member.user.tag}`);
-            } catch (error) {
-              logger.error(`Failed to assign birthday role to ${member.user.tag}:`, error);
+              logger.info(`Assigned birthday role to ${member.user.tag} (${userTimezone})`);
             }
           }
+
+          // Phase B: Strip role when local clock shifts off their calendar birthday date
+          if (!isCurrentlyBirthday && trackingData[userId]) {
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (member) {
+              if (member.roles.cache.has(BIRTHDAY_ROLE_ID)) {
+                await member.roles.remove(BIRTHDAY_ROLE_ID, `Birthday completed for timezone: ${userTimezone}.`);
+              }
+              logger.info(`Removed expired birthday role from ${member.user.tag} (${userTimezone})`);
+            }
+            delete updatedTrackingData[userId];
+          }
+        } catch (zoneError) {
+          logger.error(`Failed parsing dates for user ${userId} under timezone ${userTimezone}:`, zoneError);
         }
       }
 
-      // Save the updated tracking ledger back to the database
       await client.db.set(trackingKey, updatedTrackingData);
-
     } catch (error) {
-      logger.error(`Error managing birthday roles for guild ${guildId}:`, error);
+      logger.error(`Error executing scheduled birthday tasks for server guild ${guildId}:`, error);
     }
   }
 }
