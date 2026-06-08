@@ -7,6 +7,23 @@ const BASE_XP = 1;
 const MAX_LEVEL = 100000; // Increased to support your high 10,000+ message tiers safely
 const MIN_LEVEL = 0;
 
+// Hardcoded Channel Whitelist (Only channels where XP can be earned)
+const WHITELISTED_CHANNELS = [
+  '1362470860933435473', // announcements
+  '1362496298594468040', // videos
+  '1362473134518702092', // polls
+  '1362472109695303850', // customs
+  '1363961382881722488', // server-partners
+  '1362460501262602280', // general
+  '1364666865900585041', // rocket-bot-royale
+  '1362474458744623174', // clips-highlights
+  '1364519871894782018', // advertise
+  '1398684356414804020', // art
+  '1362473271995535681', // bot-commands
+  '1362473726284791969', // role-requests
+  '1362454275309043745'  // voice-chat text
+];
+
 /**
  * Calculates XP required to advance *one more level* from the target level.
  * New System: Every single level transition costs exactly 1 XP.
@@ -182,9 +199,10 @@ export function createLeaderboardEmbed(leaderboard, guild) {
 }
 
 export async function getLevelingConfig(client, guildId) {
+  let config;
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    return guildConfig.leveling || {
+    config = guildConfig.leveling || {
       enabled: true,
       xpPerMessage: { min: 1, max: 1 },
       xpCooldown: 0,
@@ -199,7 +217,7 @@ export async function getLevelingConfig(client, guildId) {
     };
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return {
+    config = {
       enabled: true,
       xpPerMessage: { min: 1, max: 1 },
       xpCooldown: 0,
@@ -213,6 +231,20 @@ export async function getLevelingConfig(client, guildId) {
       xpMultiplier: 1
     };
   }
+
+  // Intercepting mechanism: Inject all channels across the server into ignoredChannels 
+  // EXCEPT the ones specified inside our WHITELISTED_CHANNELS configuration array.
+  try {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
+      const serverChannels = Array.from(guild.channels.cache.keys());
+      config.ignoredChannels = serverChannels.filter(id => !WHITELISTED_CHANNELS.includes(id));
+    }
+  } catch (err) {
+    logger.error(`Error calculating text channel runtime whitelist overrides:`, err);
+  }
+
+  return config;
 }
 
 export async function getUserLevelData(client, guildId, userId) {
