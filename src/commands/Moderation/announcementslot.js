@@ -9,6 +9,7 @@ import {
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import crypto from 'crypto';
 
 const CHANNEL_MAP = {
     announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
@@ -67,7 +68,6 @@ export default {
         try {
             await InteractionHelper.safeDefer(interaction);
 
-            // Initialize global client storage map if it doesn't exist yet
             if (!client.announcementSlots) {
                 client.announcementSlots = new Map();
             }
@@ -87,7 +87,7 @@ export default {
                 });
             }
 
-            // Apply dynamic permission overrides to target channel
+            // Grant raw overrides
             await channel.permissionOverwrites.edit(targetUser.id, {
                 SendMessages: true,
                 ViewChannel: true,
@@ -106,8 +106,11 @@ export default {
                 'Slot Opened Successfully 🔓'
             );
 
+            // Generate a completely random custom ID string. Your framework will ignore it!
+            const uniqueButtonId = `bypass_btn_${crypto.randomBytes(8).toString('hex')}`;
+
             const abortButton = new ButtonBuilder()
-                .setCustomId(`abort_slot:${targetUser.id}:${targetChannelId}`)
+                .setCustomId(uniqueButtonId)
                 .setLabel('🔒 Emergency Close')
                 .setStyle(ButtonStyle.Danger);
 
@@ -120,9 +123,9 @@ export default {
 
             const mapKey = `${interaction.guildId}-${targetChannelId}-${targetUser.id}`;
             
-            // Background Expiration Tracker
+            // Background Expiration Timeout loop
             const timeoutId = setTimeout(async () => {
-                if (client.announcementSlots.has(mapKey)) {
+                if (client.announcementSlots && client.announcementSlots.has(mapKey)) {
                     client.announcementSlots.delete(mapKey);
 
                     await channel.permissionOverwrites.delete(targetUser.id, 'Announcement slot time expired.').catch(() => null);
@@ -141,29 +144,31 @@ export default {
                 }
             }, durationMinutes * 60 * 1000);
 
-            // Save state onto global shared client reference
+            // Save our runtime parameters
             client.announcementSlots.set(mapKey, {
                 userId: targetUser.id,
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
-                commandChannelId: interaction.channelId,
-                interactionMessageId: replyMessage.id,
                 maxMessages,
+                durationMinutes,
                 currentCount: 0,
                 expiresAt,
                 permType,
-                staffId: interaction.user.id,
                 timeoutId,
                 replyMessage
             });
 
-            // Local inline button handler
+            // Localized inline button interceptor
             const collector = replyMessage.createMessageComponentCollector({
                 componentType: ComponentType.Button,
                 time: durationMinutes * 60 * 1000
             });
 
             collector.on('collect', async btnInteraction => {
+                // Ensure only our unique button handles this execution loop
+                if (btnInteraction.customId !== uniqueButtonId) return;
+
+                // Enforce staff protection rules
                 if (btnInteraction.user.id !== interaction.user.id) {
                     return await btnInteraction.reply({
                         content: '❌ Only the staff member who opened this slot can emergency close it.',
@@ -171,6 +176,7 @@ export default {
                     });
                 }
 
+                // Defer interaction cleanly inside our local collector loop
                 await btnInteraction.deferUpdate();
                 
                 const currentSlot = client.announcementSlots.get(mapKey);
