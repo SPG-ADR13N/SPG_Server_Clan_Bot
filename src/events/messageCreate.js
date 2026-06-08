@@ -14,7 +14,7 @@ export default {
     try {
       if (message.author.bot || !message.guild) return;
 
-      // 1. Process announcement slots tracking via global client store
+      // 1. Process announcement slots tracking via clean client memory map
       await handleAnnouncementSlot(message, client);
 
       // 2. Process core server message milestones leveling
@@ -26,7 +26,6 @@ export default {
 };
 
 async function handleAnnouncementSlot(message, client) {
-  // Ensure the collection check doesn't crash if no commands have run yet
   if (!client.announcementSlots) return;
 
   const mapKey = `${message.guild.id}-${message.channel.id}-${message.author.id}`;
@@ -35,11 +34,10 @@ async function handleAnnouncementSlot(message, client) {
     if (!client.announcementSlots.has(mapKey)) return;
     const slotData = client.announcementSlots.get(mapKey);
 
-    // If time window passed, clean up tracking instantly
     if (Date.now() > slotData.expiresAt) {
       clearTimeout(slotData.timeoutId);
       client.announcementSlots.delete(mapKey);
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Time backup check clean.').catch(() => null);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Backup check cleanup sweep.').catch(() => null);
       return;
     }
 
@@ -49,7 +47,7 @@ async function handleAnnouncementSlot(message, client) {
       clearTimeout(slotData.timeoutId);
       client.announcementSlots.delete(mapKey);
 
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Target slot limits met.').catch(() => null);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Target message limits met.').catch(() => null);
 
       const finalEmbed = successEmbed(
         `👤 **User:** <@${slotData.userId}>\n` +
@@ -61,16 +59,21 @@ async function handleAnnouncementSlot(message, client) {
         'Slot Closed 🔒'
       ).setColor('#DD2E44');
 
-      if (slotData.replyMessage) {
-        await slotData.replyMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
+      // Fetch fresh instances from the API to guarantee embed update on limit reached
+      const commandChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+      if (commandChannel) {
+        const targetInteractionMessage = await commandChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
+        if (targetInteractionMessage) {
+          await targetInteractionMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
+        }
       }
       
-      logger.info(`Slot successfully fulfilled for user ${message.author.id}. Status panel updated.`);
+      logger.info(`Slot fulfilled for user ${message.author.id}. Managed text update panel complete.`);
     } else {
       client.announcementSlots.set(mapKey, slotData);
     }
   } catch (error) {
-    logger.error('Error updating status panel on announcement slot completion:', error);
+    logger.error('Error executing slot clean state management logic:', error);
   }
 }
 
