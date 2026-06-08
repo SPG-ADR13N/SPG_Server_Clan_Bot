@@ -7,7 +7,7 @@ export const CommandToggles = {
     
     // --- USELESS COMMANDS TO HIDE FROM EVERYONE ---
     // Change any of these to true if you ever want them back!
-    weather: false,
+    weather: true,
     meme: false,
     coinflip: false,
     poll: false,
