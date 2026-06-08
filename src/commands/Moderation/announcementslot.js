@@ -4,12 +4,11 @@ import {
     ActionRowBuilder, 
     ButtonBuilder, 
     ButtonStyle,
-    ComponentType
+    Events
 } from 'discord.js';
 import { successEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-import crypto from 'crypto';
 
 const CHANNEL_MAP = {
     announcements: '1362470860933435473', // REPLACE WITH YOUR REAL CHANNEL ID
@@ -17,6 +16,9 @@ const CHANNEL_MAP = {
     videos:        '1362496298594468040', // REPLACE WITH YOUR REAL CHANNEL ID
     polls:         '1362473134518702092'  // REPLACE WITH YOUR REAL CHANNEL ID
 };
+
+// Global initialization flag to prevent duplicate event attachments on reload
+let isButtonListenerAttached = false;
 
 export default {
     data: new SlashCommandBuilder()
@@ -72,6 +74,12 @@ export default {
                 client.announcementSlots = new Map();
             }
 
+            // Hook into the central client event stream directly (bypasses local collectors)
+            if (!isButtonListenerAttached) {
+                setupGlobalButtonInterceptor(client);
+                isButtonListenerAttached = true;
+            }
+
             const targetUser = interaction.options.getUser('user');
             const channelKey = interaction.options.getString('channel');
             const maxMessages = interaction.options.getInteger('message_count');
@@ -87,7 +95,7 @@ export default {
                 });
             }
 
-            // Grant raw overrides
+            // Grant overrides
             await channel.permissionOverwrites.edit(targetUser.id, {
                 SendMessages: true,
                 ViewChannel: true,
@@ -106,26 +114,23 @@ export default {
                 'Slot Opened Successfully 🔓'
             );
 
-            // Generate a completely random custom ID string. Your framework will ignore it!
-            const uniqueButtonId = `bypass_btn_${crypto.randomBytes(8).toString('hex')}`;
+            // Encode data straight into the customId metadata string
+            const buttonCustomId = `eslot:${interaction.guildId}:${targetChannelId}:${targetUser.id}`;
 
             const abortButton = new ButtonBuilder()
-                .setCustomId(uniqueButtonId)
+                .setCustomId(buttonCustomId)
                 .setLabel('🔒 Emergency Close')
                 .setStyle(ButtonStyle.Danger);
 
             const row = new ActionRowBuilder().addComponents(abortButton);
-
-            const replyMessage = await InteractionHelper.safeEditReply(interaction, {
-                embeds: [embed],
-                components: [row]
-            });
+            const replyMessage = await InteractionHelper.safeEditReply(interaction, { embeds: [embed], components: [row] });
 
             const mapKey = `${interaction.guildId}-${targetChannelId}-${targetUser.id}`;
             
-            // Background Expiration Timeout loop
+            // Background Expiration Tracker
             const timeoutId = setTimeout(async () => {
                 if (client.announcementSlots && client.announcementSlots.has(mapKey)) {
+                    const activeSlot = client.announcementSlots.get(mapKey);
                     client.announcementSlots.delete(mapKey);
 
                     await channel.permissionOverwrites.delete(targetUser.id, 'Announcement slot time expired.').catch(() => null);
@@ -140,65 +145,31 @@ export default {
                         'Slot Closed 🔒'
                     ).setColor('#DD2E44');
 
-                    await replyMessage.edit({ embeds: [expiredEmbed], components: [] }).catch(() => null);
+                    // Fetch fresh instances from API to guarantee embed update
+                    const cmdChannel = await client.channels.fetch(activeSlot.commandChannelId).catch(() => null);
+                    if (cmdChannel) {
+                        const targetMsg = await cmdChannel.messages.fetch(activeSlot.interactionMessageId).catch(() => null);
+                        if (targetMsg) {
+                            await targetMsg.edit({ embeds: [expiredEmbed], components: [] }).catch(() => null);
+                        }
+                    }
                 }
             }, durationMinutes * 60 * 1000);
 
-            // Save our runtime parameters
+            // Store pure data strings instead of complex objects
             client.announcementSlots.set(mapKey, {
                 userId: targetUser.id,
                 channelId: targetChannelId,
                 guildId: interaction.guildId,
+                commandChannelId: interaction.channelId,
+                interactionMessageId: replyMessage.id,
                 maxMessages,
                 durationMinutes,
                 currentCount: 0,
                 expiresAt,
                 permType,
-                timeoutId,
-                replyMessage
-            });
-
-            // Localized inline button interceptor
-            const collector = replyMessage.createMessageComponentCollector({
-                componentType: ComponentType.Button,
-                time: durationMinutes * 60 * 1000
-            });
-
-            collector.on('collect', async btnInteraction => {
-                // Ensure only our unique button handles this execution loop
-                if (btnInteraction.customId !== uniqueButtonId) return;
-
-                // Enforce staff protection rules
-                if (btnInteraction.user.id !== interaction.user.id) {
-                    return await btnInteraction.reply({
-                        content: '❌ Only the staff member who opened this slot can emergency close it.',
-                        ephemeral: true
-                    });
-                }
-
-                // Defer interaction cleanly inside our local collector loop
-                await btnInteraction.deferUpdate();
-                
-                const currentSlot = client.announcementSlots.get(mapKey);
-                if (!currentSlot) return;
-
-                clearTimeout(currentSlot.timeoutId);
-                client.announcementSlots.delete(mapKey);
-
-                await channel.permissionOverwrites.delete(targetUser.id, 'Slot manually aborted by staff.').catch(() => null);
-
-                const closedEmbed = successEmbed(
-                    `👤 **User:** <@${targetUser.id}>\n` +
-                    `📺 **Channel:** <#${targetChannelId}>\n` +
-                    `💬 **Limit:** ${maxMessages} message${maxMessages !== 1 ? 's' : ''}\n` +
-                    `⏳ **Time Limit:** ${durationMinutes} minutes\n` +
-                    `🔑 **Permissions:** \`${permType}\`\n\n` +
-                    `**Status:** 🔴 Closed | Reason: Manually aborted by staff`,
-                    'Slot Closed 🔒'
-                ).setColor('#DD2E44');
-
-                await btnInteraction.editReply({ embeds: [closedEmbed], components: [] });
-                collector.stop();
+                staffId: interaction.user.id,
+                timeoutId
             });
 
         } catch (error) {
@@ -206,3 +177,60 @@ export default {
         }
     }
 };
+
+function setupGlobalButtonInterceptor(client) {
+    client.on(Events.InteractionCreate, async btnInteraction => {
+        if (!btnInteraction.isButton()) return;
+        if (!btnInteraction.customId.startsWith('eslot:')) return;
+
+        try {
+            // Unpack customId payload data string
+            const [, guildId, targetChannelId, targetUserId] = btnInteraction.customId.split(':');
+            const mapKey = `${guildId}-${targetChannelId}-${targetUserId}`;
+
+            if (!client.announcementSlots || !client.announcementSlots.has(mapKey)) return;
+            const slotData = client.announcementSlots.get(mapKey);
+
+            // Restrict access exclusively to the staff author
+            if (btnInteraction.user.id !== slotData.staffId) {
+                return await btnInteraction.reply({
+                    content: '❌ Only the staff member who opened this slot can close it.',
+                    ephemeral: true
+                });
+            }
+
+            // Immediately acknowledge interaction to completely block "This interaction failed" errors
+            await btnInteraction.deferUpdate().catch(() => null);
+
+            clearTimeout(slotData.timeoutId);
+            client.announcementSlots.delete(mapKey);
+
+            const channel = await btnInteraction.guild.channels.fetch(targetChannelId).catch(() => null);
+            if (channel) {
+                await channel.permissionOverwrites.delete(targetUserId, 'Emergency closed by staff.').catch(() => null);
+            }
+
+            const closedEmbed = successEmbed(
+                `👤 **User:** <@${slotData.userId}>\n` +
+                `📺 **Channel:** <#${slotData.channelId}>\n` +
+                `💬 **Limit:** ${slotData.maxMessages} message${slotData.maxMessages !== 1 ? 's' : ''}\n` +
+                `⏳ **Time Limit:** ${slotData.durationMinutes} minutes\n` +
+                `🔑 **Permissions:** \`${slotData.permType}\`\n\n` +
+                `**Status:** 🔴 Closed | Reason: Manually aborted by staff`,
+                'Slot Closed 🔒'
+            ).setColor('#DD2E44');
+
+            // Force update via fresh API calls
+            const cmdChannel = await client.channels.fetch(slotData.commandChannelId).catch(() => null);
+            if (cmdChannel) {
+                const targetMsg = await cmdChannel.messages.fetch(slotData.interactionMessageId).catch(() => null);
+                if (targetMsg) {
+                    await targetMsg.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
+                }
+            }
+
+        } catch (error) {
+            logger.error('Error executing global emergency button interceptor handler:', error);
+        }
+    });
+}
