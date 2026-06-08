@@ -4,7 +4,6 @@ import { getLevelingConfig, getUserLevelData } from '../services/leveling.js';
 import { addXp } from '../services/xpSystem.js';
 import { checkRateLimit } from '../utils/rateLimiter.js';
 import { successEmbed } from '../utils/embeds.js';
-import { activeSlots } from '../commands/Moderation/announcementslot.js';
 
 const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 20;
 const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
@@ -15,10 +14,10 @@ export default {
     try {
       if (message.author.bot || !message.guild) return;
 
-      // 1. Live check and update announcement slot rules
+      // 1. Process announcement slots tracking via global client store
       await handleAnnouncementSlot(message, client);
 
-      // 2. Core leveling framework logic
+      // 2. Process core server message milestones leveling
       await handleLeveling(message, client);
     } catch (error) {
       logger.error('Error in messageCreate event:', error);
@@ -27,29 +26,30 @@ export default {
 };
 
 async function handleAnnouncementSlot(message, client) {
+  // Ensure the collection check doesn't crash if no commands have run yet
+  if (!client.announcementSlots) return;
+
   const mapKey = `${message.guild.id}-${message.channel.id}-${message.author.id}`;
   
   try {
-    // Check our central fast memory store directly
-    if (!activeSlots || !activeSlots.has(mapKey)) return;
-    const slotData = activeSlots.get(mapKey);
+    if (!client.announcementSlots.has(mapKey)) return;
+    const slotData = client.announcementSlots.get(mapKey);
 
-    // Dynamic fallback checks
+    // If time window passed, clean up tracking instantly
     if (Date.now() > slotData.expiresAt) {
       clearTimeout(slotData.timeoutId);
-      activeSlots.delete(mapKey);
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Fallback timer sweep.').catch(() => null);
+      client.announcementSlots.delete(mapKey);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Time backup check clean.').catch(() => null);
       return;
     }
 
     slotData.currentCount += 1;
 
     if (slotData.currentCount >= slotData.maxMessages) {
-      // Limit hit! Erase the timer tracker and wipe permissions instantly
       clearTimeout(slotData.timeoutId);
-      activeSlots.delete(mapKey);
+      client.announcementSlots.delete(mapKey);
 
-      await message.channel.permissionOverwrites.delete(message.author.id, 'Slot channel text limits completed.').catch(() => null);
+      await message.channel.permissionOverwrites.delete(message.author.id, 'Target slot limits met.').catch(() => null);
 
       const finalEmbed = successEmbed(
         `👤 **User:** <@${slotData.userId}>\n` +
@@ -61,18 +61,16 @@ async function handleAnnouncementSlot(message, client) {
         'Slot Closed 🔒'
       ).setColor('#DD2E44');
 
-      // Edit the original interaction message directly in place 
       if (slotData.replyMessage) {
         await slotData.replyMessage.edit({ embeds: [finalEmbed], components: [] }).catch(() => null);
       }
       
-      logger.info(`Slot successfully completed and closed for user ${message.author.id}.`);
+      logger.info(`Slot successfully fulfilled for user ${message.author.id}. Status panel updated.`);
     } else {
-      // Save data increment state back into our map
-      activeSlots.set(mapKey, slotData);
+      client.announcementSlots.set(mapKey, slotData);
     }
   } catch (error) {
-    logger.error('Error checking active announcement slot updates:', error);
+    logger.error('Error updating status panel on announcement slot completion:', error);
   }
 }
 
