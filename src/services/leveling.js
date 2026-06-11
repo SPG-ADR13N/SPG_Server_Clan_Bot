@@ -295,33 +295,4 @@ export async function saveUserLevelData(client, guildId, userId, data) {
   }
 }
 
-export async function saveLevelingConfig(client, guildId, config) {
-  try {
-    if (!guildId || !config) {
-      throw new TitanBotError(
-        'Guild ID and config are required',
-        ErrorTypes.VALIDATION
-      );
-    }
-
-    const guildConfig = await getGuildConfig(client, guildId);
-    
-    if (config.xpCooldown && (config.xpCooldown < 0 || config.xpCooldown > 3600)) {
-      throw new TitanBotError(
-        'XP cooldown must be between 0 and 3600 seconds',
-        ErrorTypes.VALIDATION,
-        'Cooldown must be between 0 and 3600 seconds.'
-      );
-    }
-
-    // Fixes the dashboard interaction crash by handling both old and new data structures safely
-    const range = config.xpPerMessage || config.xpRange;
-    if (range) {
-      const min = range.min !== undefined ? range.min : 1;
-      const max = range.max !== undefined ? range.max : 1;
-      
-      if (min < 1 || max < 1 || min > max) {
-        throw new TitanBotError(
-          'Invalid XP range configuration',
-          ErrorTypes.VALIDATION,
-          'Minimum XP must
+export
