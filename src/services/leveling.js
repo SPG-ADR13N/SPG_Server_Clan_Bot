@@ -7,6 +7,23 @@ const BASE_XP = 1;
 const MAX_LEVEL = 100000; // Increased to support your high 10,000+ message tiers safely
 const MIN_LEVEL = 0;
 
+// Hardcoded Channel Whitelist (Only channels where XP can be earned)
+const WHITELISTED_CHANNELS = [
+  '1362470860933435473', // announcements
+  '1362496298594468040', // videos
+  '1362473134518702092', // polls
+  '1362472109695303850', // customs
+  '1363961382881722488', // server-partners
+  '1362460501262602280', // general
+  '1364666865900585041', // rocket-bot-royale
+  '1362474458744623174', // clips-highlights
+  '1364519871894782018', // advertise
+  '1398684356414804020', // art
+  '1362473271995535681', // bot-commands
+  '1362473726284791969', // role-requests
+  '1362454275309043745'  // voice-chat text
+];
+
 /**
  * Calculates XP required to advance *one more level* from the target level.
  * New System: Every single level transition costs exactly 1 XP.
@@ -182,9 +199,10 @@ export function createLeaderboardEmbed(leaderboard, guild) {
 }
 
 export async function getLevelingConfig(client, guildId) {
+  let config;
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    return guildConfig.leveling || {
+    config = guildConfig.leveling || {
       enabled: true,
       xpPerMessage: { min: 1, max: 1 },
       xpCooldown: 0,
@@ -199,7 +217,7 @@ export async function getLevelingConfig(client, guildId) {
     };
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return {
+    config = {
       enabled: true,
       xpPerMessage: { min: 1, max: 1 },
       xpCooldown: 0,
@@ -213,6 +231,20 @@ export async function getLevelingConfig(client, guildId) {
       xpMultiplier: 1
     };
   }
+
+  // Intercepting mechanism: Inject all channels across the server into ignoredChannels 
+  // EXCEPT the ones specified inside our WHITELISTED_CHANNELS configuration array.
+  try {
+    const guild = client.guilds.cache.get(guildId);
+    if (guild) {
+      const serverChannels = Array.from(guild.channels.cache.keys());
+      config.ignoredChannels = serverChannels.filter(id => !WHITELISTED_CHANNELS.includes(id));
+    }
+  } catch (err) {
+    logger.error(`Error calculating text channel runtime whitelist overrides:`, err);
+  }
+
+  return config;
 }
 
 export async function getUserLevelData(client, guildId, userId) {
@@ -295,4 +327,197 @@ export async function saveUserLevelData(client, guildId, userId, data) {
   }
 }
 
-export
+export async function saveLevelingConfig(client, guildId, config) {
+  try {
+    if (!guildId || !config) {
+      throw new TitanBotError(
+        'Guild ID and config are required',
+        ErrorTypes.VALIDATION
+      );
+    }
+
+    const guildConfig = await getGuildConfig(client, guildId);
+    
+    if (config.xpCooldown && (config.xpCooldown < 0 || config.xpCooldown > 3600)) {
+      throw new TitanBotError(
+        'XP cooldown must be between 0 and 3600 seconds',
+        ErrorTypes.VALIDATION,
+        'Cooldown must be between 0 and 3600 seconds.'
+      );
+    }
+
+    if (config.xpRange && (config.xpRange.min < 1 || config.xpRange.max < 1 || config.xpRange.min > config.xpRange.max)) {
+      throw new TitanBotError(
+        'Invalid XP range configuration',
+        ErrorTypes.VALIDATION,
+        'Minimum XP must be less than maximum XP, and both must be positive.'
+      );
+    }
+
+    guildConfig.leveling = config;
+    await setGuildConfig(client, guildId, guildConfig);
+    
+    logger.info(`Leveling config updated for guild ${guildId}`);
+  } catch (error) {
+    logger.error(`Error saving leveling config for guild ${guildId}:`, error);
+    if (error instanceof TitanBotError) throw error;
+    throw new TitanBotError(
+      `Failed to save config: ${error.message}`,
+      ErrorTypes.DATABASE,
+      'Could not save configuration at this time.'
+    );
+  }
+}
+
+export async function addLevels(client, guildId, userId, levels) {
+  try {
+    const levelingConfig = await getLevelingConfig(client, guildId);
+    if (!levelingConfig?.enabled) {
+      throw new TitanBotError(
+        'Leveling system is disabled on this server',
+        ErrorTypes.CONFIGURATION,
+        'The leveling system is currently disabled on this server.'
+      );
+    }
+
+    if (!Number.isInteger(levels) || levels <= 0) {
+      throw new TitanBotError(
+        `Invalid level amount: ${levels}`,
+        ErrorTypes.VALIDATION,
+        'You must add a positive number of levels.'
+      );
+    }
+
+    const userData = await getUserLevelData(client, guildId, userId);
+    const newLevel = userData.level + levels;
+
+    if (newLevel > MAX_LEVEL) {
+      throw new TitanBotError(
+        `Level ${newLevel} exceeds maximum level ${MAX_LEVEL}`,
+        ErrorTypes.VALIDATION,
+        `Maximum level is ${MAX_LEVEL}.`
+      );
+    }
+
+    // New 1:1 Alignment logic
+    userData.level = newLevel;
+    userData.xp = newLevel; 
+    userData.totalXp = newLevel;
+
+    await saveUserLevelData(client, guildId, userId, userData);
+    
+    logger.info(`Added ${levels} levels to user ${userId} in guild ${guildId}`);
+    return userData;
+  } catch (error) {
+    logger.error(`Error adding levels for user ${userId}:`, error);
+    if (error instanceof TitanBotError) throw error;
+    throw new TitanBotError(
+      `Failed to add levels: ${error.message}`,
+      ErrorTypes.DATABASE,
+      'Could not add levels at this time.'
+    );
+  }
+}
+
+export async function removeLevels(client, guildId, userId, levels) {
+  try {
+    const levelingConfig = await getLevelingConfig(client, guildId);
+    if (!levelingConfig?.enabled) {
+      throw new TitanBotError(
+        'Leveling system is disabled on this server',
+        ErrorTypes.CONFIGURATION,
+        'The leveling system is currently disabled on this server.'
+      );
+    }
+
+    if (!Number.isInteger(levels) || levels <= 0) {
+      throw new TitanBotError(
+        `Invalid level amount: ${levels}`,
+        ErrorTypes.VALIDATION,
+        'You must remove a positive number of levels.'
+      );
+    }
+
+    const userData = await getUserLevelData(client, guildId, userId);
+    const newLevel = Math.max(MIN_LEVEL, userData.level - levels);
+
+    // New 1:1 Alignment logic
+    userData.level = newLevel;
+    userData.xp = newLevel;
+    userData.totalXp = newLevel;
+
+    await saveUserLevelData(client, guildId, userId, userData);
+    
+    logger.info(`Removed ${levels} levels from user ${userId} in guild ${guildId}`);
+    return userData;
+  } catch (error) {
+    logger.error(`Error removing levels for user ${userId}:`, error);
+    if (error instanceof TitanBotError) throw error;
+    throw new TitanBotError(
+      `Failed to remove levels: ${error.message}`,
+      ErrorTypes.DATABASE,
+      'Could not remove levels at this time.'
+    );
+  }
+}
+
+export async function setUserLevel(client, guildId, userId, level) {
+  try {
+    const levelingConfig = await getLevelingConfig(client, guildId);
+    if (!levelingConfig?.enabled) {
+      throw new TitanBotError(
+        'Leveling system is disabled on this server',
+        ErrorTypes.CONFIGURATION,
+        'The leveling system is currently disabled on this server.'
+      );
+    }
+
+    if (!Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
+      throw new TitanBotError(
+        `Invalid level: ${level}`,
+        ErrorTypes.VALIDATION,
+        `Level must be between ${MIN_LEVEL} and ${MAX_LEVEL}.`
+      );
+    }
+
+    const userData = await getUserLevelData(client, guildId, userId);
+    
+    // New 1:1 Alignment logic
+    userData.level = level;
+    userData.xp = level;
+    userData.totalXp = level;
+
+    await saveUserLevelData(client, guildId, userId, userData);
+    
+    logger.info(`Set level for user ${userId} to ${level} in guild ${guildId}`);
+    return userData;
+  } catch (error) {
+    logger.error(`Error setting level for user ${userId}:`, error);
+    if (error instanceof TitanBotError) throw error;
+    throw new TitanBotError(
+      `Failed to set level: ${error.message}`,
+      ErrorTypes.DATABASE,
+      'Could not set level at this time.'
+    );
+  }
+}
+
+export async function deleteUserLevelData(client, guildId, userId) {
+  try {
+    if (!guildId || !userId) {
+      throw new TitanBotError(
+        'Guild ID and User ID are required',
+        ErrorTypes.VALIDATION
+      );
+    }
+
+    const key = `${guildId}:leveling:users:${userId}`;
+    await client.db.delete(key);
+    
+    logger.debug(`Deleted level data for user ${userId} in guild ${guildId}`);
+  } catch (error) {
+    logger.error(`Error deleting level data for user ${userId}:`, error);
+    if (error instanceof TitanBotError) throw error;
+    logger.warn(`Could not delete level data for user ${userId} in guild ${guildId}`);
+  }
+}
