@@ -161,28 +161,6 @@ export default {
     async execute(interaction, config, client) {
         try {
             const guildId = interaction.guild.id;
-
-            // ─── FORCE COMPLETE PROFILE RE-CREATION ────────────────────────────
-            try {
-                const rawCfg = await getLevelingConfig(client, guildId);
-                if (rawCfg) {
-                    // 1. Completely break the old structure by turning it into a brand new object
-                    const freshConfig = {
-                        configured: true,
-                        enabled: true,
-                        announceLevelUp: true,
-                        ignoredChannels: [], // Force 100% empty array
-                        ignoredRoles: []     // Force 100% empty array
-                    };
-                    
-                    // 2. Overwrite the entire database slot with the clean object
-                    await saveLevelingConfig(client, guildId, freshConfig);
-                    logger.info("=== PROFILE RESET: Replaced entire config structure with a blank slate ===");
-                }
-            } catch (resetErr) {
-                logger.error("Profile re-creation failed:", resetErr);
-            }
-            // ───────────────────────────────────────────────────────────────────
             const cfg = await getLevelingConfig(client, guildId);
 
             if (!cfg.configured) {
