@@ -41,27 +41,37 @@ function buildDashboardEmbed(cfg, guild) {
 
     const ignoredChannels = cfg.ignoredChannels ?? [];
     const ignoredRoles = cfg.ignoredRoles ?? [];
-    const ignoredChValue = ignoredChannels.length > 0 ? ignoredChannels.map(id => `<#${id}>`).join(', ') : '`None`';
-    
-    // Fixed: Corrected the Discord role mention layout structure from <&id> to <@&id>
-    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => `<@&${id}>`).join(', ') : '`None`';
+    const ignoredChValue = ignoredChannels.length > 0 ? ignoredChannels.map(id => typeof id === 'object' ? `<#${id.id || id.value}>` : `<#${id}>`).join(', ') : '`None`';
+    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => typeof id === 'object' ? `<@&${id.id || id.value}>` : `<@&${id}>`).join(', ') : '`None`';
+
+    // Defensive check: Ensures nothing empty, null, or weird slips into addFields
+    const rawFields = [
+        { name: '📢 Level-up Channel', value: channel, inline: true },
+        { name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
+        { name: '📣 Announcements', value: cfg.announceLevelUp !== false ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
+        { name: '🎲 XP per Message', value: `\`${xpMin} – ${xpMax}\``, inline: true },
+        { name: '⏱️ XP Cooldown', value: `\`${cooldown}s\``, inline: true },
+        { name: '\u200B', value: '\u200B', inline: true },
+        { name: '💬 Level-up Message', value: msgPreview, inline: false },
+        { name: '🏆 Role Rewards', value: rewardsValue, inline: false },
+        { name: '⛔ Ignored Channels', value: ignoredChValue, inline: true },
+        { name: '⛔ Ignored Roles', value: ignoredRoValue, inline: true },
+    ];
+
+    const cleanFields = rawFields.map(field => {
+        let safeValue = String(field.value || '').trim();
+        if (!safeValue || safeValue === 'undefined' || safeValue === 'null' || safeValue === '[object Object]') {
+            logger.warn(`[DASHBOARD STABILITY PATCH] Field "${field.name}" had an invalid value:`, field.value);
+            safeValue = '`Error loading value`';
+        }
+        return { name: field.name, value: safeValue, inline: field.inline };
+    });
 
     return new EmbedBuilder()
         .setTitle('📊 Leveling System Dashboard')
         .setDescription(`Manage leveling settings for **${guild.name}**.\nSelect an option below to modify a setting.`)
         .setColor(getColor('info'))
-        .addFields(
-            { name: '📢 Level-up Channel', value: channel, inline: true },
-            { name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
-            { name: '📣 Announcements', value: cfg.announceLevelUp !== false ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
-            { name: '🎲 XP per Message', value: `\`${xpMin} – ${xpMax}\``, inline: true },
-            { name: '⏱️ XP Cooldown', value: `\`${cooldown}s\``, inline: true },
-            { name: '\u200B', value: '\u200B', inline: true },
-            { name: '💬 Level-up Message', value: msgPreview, inline: false },
-            { name: '🏆 Role Rewards', value: rewardsValue, inline: false },
-            { name: '⛔ Ignored Channels', value: ignoredChValue, inline: true },
-            { name: '⛔ Ignored Roles', value: ignoredRoValue, inline: true },
-        )
+        .addFields(cleanFields)
         .setFooter({ text: 'Dashboard closes after 10 minutes of inactivity' })
         .setTimestamp();
 }
