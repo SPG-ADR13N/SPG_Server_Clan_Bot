@@ -83,19 +83,6 @@ async function handleAnnouncementSlot(message) {
   }
 }
 
-// ─── TEMPORARY WIPE CODE ─────────────────────────────────────────────────────
-try {
-    const cfg = await getLevelingConfig(message.client, '1362454274499547187');
-    if (cfg && cfg.ignoredChannels?.length > 0) {
-        cfg.ignoredChannels = []; 
-        await saveLevelingConfig(message.client, '1362454274499547187', cfg);
-        logger.info("=== SUCCESS: Dashboard channel list has been completely reset to empty! ===");
-    }
-} catch (err) {
-    logger.error("Failed to run temporary reset script:", err);
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function handleLeveling(message) {
   try {
     const rateLimitKey = `xp-event:${message.guild.id}:${message.author.id}`;
