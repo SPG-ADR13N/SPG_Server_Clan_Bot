@@ -27,9 +27,9 @@ import { botHasPermission } from '../../../utils/permissionGuard.js';
 
 function buildDashboardEmbed(cfg, guild) {
     const channel = cfg.levelUpChannel ? `<#${cfg.levelUpChannel}>` : '`Not set`';
-    const xpMin = cfg.xpRange?.min ?? cfg.xpPerMessage?.min ?? 15;
-    const xpMax = cfg.xpRange?.max ?? cfg.xpPerMessage?.max ?? 25;
-    const cooldown = cfg.xpCooldown ?? 60;
+    const xpMin = cfg.xpRange?.min ?? cfg.xpPerMessage?.min ?? 1;
+    const xpMax = cfg.xpRange?.max ?? cfg.xpPerMessage?.max ?? 1;
+    const cooldown = cfg.xpCooldown ?? 0;
     const rawMsg = cfg.levelUpMessage || '{user} has reached a message count of {level}!';
     const msgPreview = `\`${rawMsg.length > 60 ? rawMsg.substring(0, 60) + '…' : rawMsg}\``;
 
@@ -42,7 +42,9 @@ function buildDashboardEmbed(cfg, guild) {
     const ignoredChannels = cfg.ignoredChannels ?? [];
     const ignoredRoles = cfg.ignoredRoles ?? [];
     const ignoredChValue = ignoredChannels.length > 0 ? ignoredChannels.map(id => `<#${id}>`).join(', ') : '`None`';
-    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => `<&${id}>`).join(', ') : '`None`';
+    
+    // Fixed: Corrected the Discord role mention layout structure from <&id> to <@&id>
+    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => `<@&${id}>`).join(', ') : '`None`';
 
     return new EmbedBuilder()
         .setTitle('📊 Leveling System Dashboard')
