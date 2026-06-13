@@ -92,7 +92,7 @@ async function handleLeveling(message) {
     const levelingConfig = await getLevelingConfig(message.client, message.guild.id);
     if (!levelingConfig?.enabled) return;
 
-    if (levelingConfig.ignoredChannels?.includes(message.channel.id)) return;
+    if (levelingConfig.ignoredChannels?.length > 0 && !levelingConfig.ignoredChannels.includes(message.channel.id)) return;
 
     if (levelingConfig.ignoredRoles?.length > 0) {
       const member = await message.guild.members.fetch(message.author.id).catch(() => null);
