@@ -26,7 +26,7 @@ import { botHasPermission } from '../../../utils/permissionGuard.js';
 // ─── Embed & Menu Builders ────────────────────────────────────────────────────
 
 function buildDashboardEmbed(cfg, guild) {
-    const channel = cfg.levelUpChannel ? `<#${cfg.levelUpChannel}>` : '`Not set`';
+    const channel = cfg.levelUpChannel ? `<#${cfg.levelUpChannel}>` : 'Not set';
     const xpMin = cfg.xpRange?.min ?? cfg.xpPerMessage?.min ?? 1;
     const xpMax = cfg.xpRange?.max ?? cfg.xpPerMessage?.max ?? 1;
     const cooldown = cfg.xpCooldown ?? 0;
@@ -37,48 +37,40 @@ function buildDashboardEmbed(cfg, guild) {
     const rewardEntries = Object.entries(rewards).sort(([a], [b]) => Number(a) - Number(b));
     const rewardsValue = rewardEntries.length > 0
         ? rewardEntries.map(([lvl, roleId]) => `Level **${lvl}** → <@&${roleId}>`).join('\n')
-        : '`None configured`';
+        : 'None configured';
 
     const ignoredChannels = cfg.ignoredChannels ?? [];
     const ignoredRoles = cfg.ignoredRoles ?? [];
     
-    // Safely extract string IDs even if Discord components saved them as raw interaction objects
     const ignoredChValue = ignoredChannels.length > 0 
         ? ignoredChannels.map(id => typeof id === 'object' ? `<#${id.id || id.value}>` : `<#${id}>`).join(', ') 
-        : '`None`';
+        : 'None';
         
     const ignoredRoValue = ignoredRoles.length > 0 
         ? ignoredRoles.map(id => typeof id === 'object' ? `<@&${id.id || id.value}>` : `<@&${id}>`).join(', ') 
-        : '`None`';
+        : 'None';
 
-    // Pack fields into raw validation array
-    const rawFields = [
-        { name: '📢 Level-up Channel', value: channel, inline: true },
-        { name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
-        { name: '📣 Announcements', value: cfg.announceLevelUp !== false ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
-        { name: '🎲 XP per Message', value: `\`${xpMin} – ${xpMax}\``, inline: true },
-        { name: '⏱️ XP Cooldown', value: `\`${cooldown}s\``, inline: true },
-        { name: '\u200B', value: '\u200B', inline: true },
-        { name: '💬 Level-up Message', value: msgPreview, inline: false },
-        { name: '🏆 Role Rewards', value: rewardsValue, inline: false },
-        { name: '⛔ Ignored Channels', value: ignoredChValue, inline: true },
-        { name: '⛔ Ignored Roles', value: ignoredRoValue, inline: true },
-    ];
-
-    // Sanitize any undefined properties into pure, printable text
-    const cleanFields = rawFields.map(field => {
-        let safeValue = String(field.value || '').trim();
-        if (!safeValue || safeValue === 'undefined' || safeValue === 'null' || safeValue === '[object Object]') {
-            safeValue = '`None`';
-        }
-        return { name: field.name, value: safeValue, inline: field.inline };
-    });
+    // Fallback normalization function to ensure 100% compliant, standard string primitives
+    const clean = (val) => {
+        const str = String(val || '').trim();
+        return (!str || str === 'undefined' || str === 'null' || str === '[object Object]') ? 'None' : str;
+    };
 
     return new EmbedBuilder()
         .setTitle('📊 Leveling System Dashboard')
         .setDescription(`Manage leveling settings for **${guild.name}**.\nSelect an option below to modify a setting.`)
         .setColor(getColor('info'))
-        .addFields(...cleanFields) // Unpacks elements perfectly to satisfy the Sapphire schema engine
+        // Chaining separate fields completely avoids aggregate array parsing bugs
+        .addFields({ name: '📢 Level-up Channel', value: clean(channel), inline: true })
+        .addFields({ name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true })
+        .addFields({ name: '📣 Announcements', value: cfg.announceLevelUp !== false ? '✅ **Enabled**' : '❌ **Disabled**', inline: true })
+        .addFields({ name: '🎲 XP per Message', value: `\`${xpMin} – ${xpMax}\``, inline: true })
+        .addFields({ name: '⏱️ XP Cooldown', value: `\`${cooldown}s\``, inline: true })
+        .addFields({ name: '  ', value: '  ', inline: true }) // Uses true space strings instead of escape characters
+        .addFields({ name: '💬 Level-up Message', value: clean(msgPreview), inline: false })
+        .addFields({ name: '🏆 Role Rewards', value: clean(rewardsValue), inline: false })
+        .addFields({ name: '⛔ Ignored Channels', value: clean(ignoredChValue), inline: true })
+        .addFields({ name: '⛔ Ignored Roles', value: clean(ignoredRoValue), inline: true })
         .setFooter({ text: 'Dashboard closes after 10 minutes of inactivity' })
         .setTimestamp();
 }
