@@ -305,8 +305,21 @@ export default {
                     }).catch(() => {});
                 }
             });
+
         } catch (error) {
             if (error instanceof TitanBotError) throw error;
+            
+            // Unwraps and displays the exact properties causing the validation crash in your Railway logs
+            if (error.errors && Array.isArray(error.errors)) {
+                error.errors.forEach((subErr, i) => {
+                    logger.error(`[Dashboard Builder Error #${i + 1}]:`, subErr);
+                });
+            } else if (error.childOutputs && Array.isArray(error.childOutputs)) {
+                error.childOutputs.forEach((subErr, i) => {
+                    logger.error(`[Dashboard Structure Error #${i + 1}]:`, subErr);
+                });
+            }
+            
             logger.error('Unexpected error in level_dashboard:', error);
             throw new TitanBotError(
                 `Level dashboard failed: ${error.message}`,
@@ -316,7 +329,6 @@ export default {
         }
     },
 };
-
 // ─── Add Role Reward ─────────────────────────────────────────────────────────
 
 async function handleRoleRewardAdd(selectInteraction, rootInteraction, cfg, guildId, client) {
