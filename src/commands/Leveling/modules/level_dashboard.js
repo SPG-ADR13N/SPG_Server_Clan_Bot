@@ -26,53 +26,14 @@ import { botHasPermission } from '../../../utils/permissionGuard.js';
 // ─── Embed & Menu Builders ────────────────────────────────────────────────────
 
 function buildDashboardEmbed(cfg, guild) {
-    const channel = cfg.levelUpChannel ? `<#${cfg.levelUpChannel}>` : 'Not set';
-    const xpMin = cfg.xpRange?.min ?? cfg.xpPerMessage?.min ?? 1;
-    const xpMax = cfg.xpRange?.max ?? cfg.xpPerMessage?.max ?? 1;
-    const cooldown = cfg.xpCooldown ?? 0;
-    const rawMsg = cfg.levelUpMessage || '{user} has reached a message count of {level}!';
-    const msgPreview = `\`${rawMsg.length > 60 ? rawMsg.substring(0, 60) + '…' : rawMsg}\``;
+    // 1. Log the raw configuration object to your terminal so we can physically see it
+    console.log("=== RAW DASHBOARD CONFIG DATA ===", JSON.stringify(cfg, null, 2));
 
-    const rewards = cfg.roleRewards ?? {};
-    const rewardEntries = Object.entries(rewards).sort(([a], [b]) => Number(a) - Number(b));
-    const rewardsValue = rewardEntries.length > 0
-        ? rewardEntries.map(([lvl, roleId]) => `Level **${lvl}** → <@&${roleId}>`).join('\n')
-        : 'None configured';
-
-    const ignoredChannels = cfg.ignoredChannels ?? [];
-    const ignoredRoles = cfg.ignoredRoles ?? [];
-    
-    const ignoredChValue = ignoredChannels.length > 0 
-        ? ignoredChannels.map(id => typeof id === 'object' ? `<#${id.id || id.value}>` : `<#${id}>`).join(', ') 
-        : 'None';
-        
-    const ignoredRoValue = ignoredRoles.length > 0 
-        ? ignoredRoles.map(id => typeof id === 'object' ? `<@&${id.id || id.value}>` : `<@&${id}>`).join(', ') 
-        : 'None';
-
-    // Fallback normalization function to ensure 100% compliant, standard string primitives
-    const clean = (val) => {
-        const str = String(val || '').trim();
-        return (!str || str === 'undefined' || str === 'null' || str === '[object Object]') ? 'None' : str;
-    };
-
+    // 2. Return a completely barebones embed with zero dynamic fields
     return new EmbedBuilder()
-        .setTitle('📊 Leveling System Dashboard')
-        .setDescription(`Manage leveling settings for **${guild.name}**.\nSelect an option below to modify a setting.`)
-        .setColor(getColor('info'))
-        // Chaining separate fields completely avoids aggregate array parsing bugs
-        .addFields({ name: '📢 Level-up Channel', value: clean(channel), inline: true })
-        .addFields({ name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true })
-        .addFields({ name: '📣 Announcements', value: cfg.announceLevelUp !== false ? '✅ **Enabled**' : '❌ **Disabled**', inline: true })
-        .addFields({ name: '🎲 XP per Message', value: `\`${xpMin} – ${xpMax}\``, inline: true })
-        .addFields({ name: '⏱️ XP Cooldown', value: `\`${cooldown}s\``, inline: true })
-        .addFields({ name: '  ', value: '  ', inline: true }) // Uses true space strings instead of escape characters
-        .addFields({ name: '💬 Level-up Message', value: clean(msgPreview), inline: false })
-        .addFields({ name: '🏆 Role Rewards', value: clean(rewardsValue), inline: false })
-        .addFields({ name: '⛔ Ignored Channels', value: clean(ignoredChValue), inline: true })
-        .addFields({ name: '⛔ Ignored Roles', value: clean(ignoredRoValue), inline: true })
-        .setFooter({ text: 'Dashboard closes after 10 minutes of inactivity' })
-        .setTimestamp();
+        .setTitle('📊 Test Dashboard')
+        .setDescription(`Testing connection for guild: ${guild?.name || 'Unknown Guild'}`)
+        .setColor('#0099ff');
 }
 
 function buildSelectMenu(guildId) {
