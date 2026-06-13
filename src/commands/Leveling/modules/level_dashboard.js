@@ -157,10 +157,25 @@ async function refreshDashboard(rootInteraction, cfg, guildId) {
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
+
 export default {
     async execute(interaction, config, client) {
         try {
             const guildId = interaction.guild.id;
+
+            // ─── 100% FORCE CLEAR DATABASE INJECTION ───────────────────────────
+            try {
+                const clearCfg = await getLevelingConfig(client, '1362454274499547187');
+                if (clearCfg) {
+                    clearCfg.ignoredChannels = []; // Force array to be 100% empty
+                    await saveLevelingConfig(client, '1362454274499547187', clearCfg);
+                    logger.info("=== DATABASE HARD CLEANUP: Ignored channels successfully forced to [] ===");
+                }
+            } catch (clearError) {
+                logger.error("Database clear injection error:", clearError);
+            }
+            // ───────────────────────────────────────────────────────────────────
+
             const cfg = await getLevelingConfig(client, guildId);
 
             if (!cfg.configured) {
@@ -256,20 +271,6 @@ export default {
                     logger.debug('Button interaction already expired:', err.message);
                     return;
                 }
-
-                // ─── FORCE WIPE CHANNELS ON BUTTON CLICK ─────────────────────────────
-                try {
-                    const resetCfg = await getLevelingConfig(client, '1362454274499547187');
-                    if (resetCfg) {
-                        resetCfg.ignoredChannels = [];
-                        await saveLevelingConfig(client, '1362454274499547187', resetCfg).catch(() => {});
-                        logger.info("Database wipe executed successfully via button click!");
-                    }
-                } catch (e) {
-                    logger.error("Wipe failed:", e);
-                }
-                // ─────────────────────────────────────────────────────────────────────
-
                 const isAnnounce = btnInteraction.customId === `level_cfg_toggle_announce_${guildId}`;
 
                 if (isAnnounce) {
@@ -334,6 +335,7 @@ export default {
         } catch (error) {
             if (error instanceof TitanBotError) throw error;
             
+            // Unwraps and displays the exact properties causing the validation crash in your Railway logs
             if (error.errors && Array.isArray(error.errors)) {
                 error.errors.forEach((subErr, i) => {
                     logger.error(`[Dashboard Builder Error #${i + 1}]:`, subErr);
