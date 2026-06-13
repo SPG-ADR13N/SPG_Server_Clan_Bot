@@ -41,10 +41,17 @@ function buildDashboardEmbed(cfg, guild) {
 
     const ignoredChannels = cfg.ignoredChannels ?? [];
     const ignoredRoles = cfg.ignoredRoles ?? [];
-    const ignoredChValue = ignoredChannels.length > 0 ? ignoredChannels.map(id => typeof id === 'object' ? `<#${id.id || id.value}>` : `<#${id}>`).join(', ') : '`None`';
-    const ignoredRoValue = ignoredRoles.length > 0 ? ignoredRoles.map(id => typeof id === 'object' ? `<@&${id.id || id.value}>` : `<@&${id}>`).join(', ') : '`None`';
+    
+    // Safely extract string IDs even if Discord components saved them as raw interaction objects
+    const ignoredChValue = ignoredChannels.length > 0 
+        ? ignoredChannels.map(id => typeof id === 'object' ? `<#${id.id || id.value}>` : `<#${id}>`).join(', ') 
+        : '`None`';
+        
+    const ignoredRoValue = ignoredRoles.length > 0 
+        ? ignoredRoles.map(id => typeof id === 'object' ? `<@&${id.id || id.value}>` : `<@&${id}>`).join(', ') 
+        : '`None`';
 
-    // Defensive check: Ensures nothing empty, null, or weird slips into addFields
+    // Pack fields into raw validation array
     const rawFields = [
         { name: '📢 Level-up Channel', value: channel, inline: true },
         { name: '⚙️ System Status', value: cfg.enabled ? '✅ **Enabled**' : '❌ **Disabled**', inline: true },
@@ -58,11 +65,11 @@ function buildDashboardEmbed(cfg, guild) {
         { name: '⛔ Ignored Roles', value: ignoredRoValue, inline: true },
     ];
 
+    // Sanitize any undefined properties into pure, printable text
     const cleanFields = rawFields.map(field => {
         let safeValue = String(field.value || '').trim();
         if (!safeValue || safeValue === 'undefined' || safeValue === 'null' || safeValue === '[object Object]') {
-            logger.warn(`[DASHBOARD STABILITY PATCH] Field "${field.name}" had an invalid value:`, field.value);
-            safeValue = '`Error loading value`';
+            safeValue = '`None`';
         }
         return { name: field.name, value: safeValue, inline: field.inline };
     });
@@ -71,7 +78,7 @@ function buildDashboardEmbed(cfg, guild) {
         .setTitle('📊 Leveling System Dashboard')
         .setDescription(`Manage leveling settings for **${guild.name}**.\nSelect an option below to modify a setting.`)
         .setColor(getColor('info'))
-        .addFields(cleanFields)
+        .addFields(...cleanFields) // Unpacks elements perfectly to satisfy the Sapphire schema engine
         .setFooter({ text: 'Dashboard closes after 10 minutes of inactivity' })
         .setTimestamp();
 }
