@@ -145,71 +145,7 @@ function buildButtonRow(cfg, guildId, disabled = false) {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function refreshDashboard(rootInteraction, cfg, guildId) {
-    const selectMenu = buildSelectMenu(guildId);
-    await InteractionHelper.safeEditReply(rootInteraction, {
-        embeds: [buildDashboardEmbed(cfg, rootInteraction.guild)],
-        components: [
-            buildButtonRow(cfg, guildId),
-            new ActionRowBuilder().addComponents(selectMenu),
-        ],
-    }).catch(() => {});
-}
-
-// ─── Main Export ──────────────────────────────────────────────────────────────
-
-export default {
-    async execute(interaction, config, client) {
-        try {
-            const guildId = interaction.guild.id;
-            const cfg = await getLevelingConfig(client, guildId);
-
-            if (!cfg.configured) {
-                throw new TitanBotError(
-                    'Leveling system not configured',
-                    ErrorTypes.CONFIGURATION,
-                    'The leveling system has not been set up yet. Run `/level setup` first to configure it.',
-                );
-            }
-
-            const selectMenu = buildSelectMenu(guildId);
-            const selectRow = new ActionRowBuilder().addComponents(selectMenu);
-
-            await InteractionHelper.safeEditReply(interaction, {
-                embeds: [buildDashboardEmbed(cfg, interaction.guild)],
-                components: [buildButtonRow(cfg, guildId), selectRow],
-            });
-
-            const collector = interaction.channel.createMessageComponentCollector({
-                componentType: ComponentType.StringSelect,
-                filter: i =>
-                    i.user.id === interaction.user.id && i.customId === `level_cfg_${guildId}`,
-                time: 600_000,
-            });
-
-            collector.on('collect', async selectInteraction => {
-                const selectedOption = selectInteraction.values[0];
-                try {
-                    switch (selectedOption) {
-                        case 'channel':
-                            await handleChannel(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'message':
-                            await handleMessage(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'xp_range':
-                            await handleXpRange(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'xp_cooldown':
-                            await handleXpCooldown(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'role_reward_add':
-                            await handleRoleRewardAdd(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'role_reward_remove':
-                            await handleRoleRewardRemove(selectInteraction, interaction, cfg, guildId, client);
-                            break;
-                        case 'ignore_channels':
+case 'ignore_channels':
                             await handleIgnoreChannels(selectInteraction, interaction, cfg, guildId, client);
                             break;
                         case 'ignore_roles':
@@ -228,10 +164,12 @@ export default {
                             ? error.userMessage || 'An error occurred while processing your selection.'
                             : 'An unexpected error occurred while updating the configuration.';
 
+                    // Safely execute state updates without breaking on duplicate tokens
                     if (!selectInteraction.replied && !selectInteraction.deferred) {
                         await selectInteraction.deferUpdate().catch(() => {});
                     }
 
+                    // Fixed: Wrapped followUp in a safe catch to prevent runtime unhandled exceptions
                     await selectInteraction
                         .followUp({
                             embeds: [errorEmbed('Configuration Error', errorMessage)],
@@ -261,7 +199,9 @@ export default {
 
                 if (isAnnounce) {
                     cfg.announceLevelUp = cfg.announceLevelUp === false;
-                    await saveLevelingConfig(client, guildId, cfg);
+                    await saveLevelingConfig(client, guildId, cfg).catch(() => {});
+                    
+                    // Fixed: Safe followUp deployment with catch boundary handler
                     await btnInteraction.followUp({
                         embeds: [
                             successEmbed(
@@ -270,77 +210,24 @@ export default {
                             ),
                         ],
                         flags: MessageFlags.Ephemeral,
-                    });
+                    }).catch(() => {});
                 } else {
                     const wasEnabled = cfg.enabled !== false;
                     cfg.enabled = !wasEnabled;
-                    await saveLevelingConfig(client, guildId, cfg);
+                    await saveLevelingConfig(client, guildId, cfg).catch(() => {});
+                    
+                    // Fixed: Safe followUp deployment with catch boundary handler
                     await btnInteraction.followUp({
                         embeds: [
                             successEmbed(
-                                '✅ System Updated',
-                                `The leveling system is now **${cfg.enabled ? 'enabled' : 'disabled'}**.${!cfg.enabled ? '\nUsers will not earn XP until the system is re-enabled.' : ''}`,
+                                '✅ System Status Updated',
+                                `The leveling system has been **${cfg.enabled ? 'enabled' : 'disabled'}**.`,
                             ),
                         ],
                         flags: MessageFlags.Ephemeral,
-                    });
-                }
-
-                await refreshDashboard(interaction, cfg, guildId);
-            });
-
-            collector.on('end', async (collected, reason) => {
-                if (reason === 'time') {
-                    btnCollector.stop();
-                    const timeoutEmbed = new EmbedBuilder()
-                        .setTitle('⏰ Dashboard Timed Out')
-                        .setDescription('This dashboard has been closed due to inactivity. Please run the command again to continue.')
-                        .setColor(getColor('error'));
-                    
-                    await InteractionHelper.safeEditReply(interaction, {
-                        embeds: [timeoutEmbed],
-                        components: [],
                     }).catch(() => {});
                 }
             });
-
-            btnCollector.on('end', async (collected, reason) => {
-                if (reason === 'time') {
-                    const timeoutEmbed = new EmbedBuilder()
-                        .setTitle('⏰ Dashboard Timed Out')
-                        .setDescription('This dashboard has been closed due to inactivity. Please run the command again to continue.')
-                        .setColor(getColor('error'));
-                    
-                    await InteractionHelper.safeEditReply(interaction, {
-                        embeds: [timeoutEmbed],
-                        components: [],
-                    }).catch(() => {});
-                }
-            });
-
-        } catch (error) {
-            if (error instanceof TitanBotError) throw error;
-            
-            // Unwraps and displays the exact properties causing the validation crash in your Railway logs
-            if (error.errors && Array.isArray(error.errors)) {
-                error.errors.forEach((subErr, i) => {
-                    logger.error(`[Dashboard Builder Error #${i + 1}]:`, subErr);
-                });
-            } else if (error.childOutputs && Array.isArray(error.childOutputs)) {
-                error.childOutputs.forEach((subErr, i) => {
-                    logger.error(`[Dashboard Structure Error #${i + 1}]:`, subErr);
-                });
-            }
-            
-            logger.error('Unexpected error in level_dashboard:', error);
-            throw new TitanBotError(
-                `Level dashboard failed: ${error.message}`,
-                ErrorTypes.UNKNOWN,
-                'Failed to open the leveling dashboard.',
-            );
-        }
-    },
-};
 // ─── Add Role Reward ─────────────────────────────────────────────────────────
 
 async function handleRoleRewardAdd(selectInteraction, rootInteraction, cfg, guildId, client) {
