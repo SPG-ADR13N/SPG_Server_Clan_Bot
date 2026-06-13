@@ -123,3 +123,23 @@ async function handleLeveling(message) {
     logger.error('Error handling leveling for message:', error);
   }
 }
+
+// ─── ONE-TIME AUTOMATIC WIPE SCRIPT ──────────────────────────────────────────
+// Paste this at the absolute bottom of messageCreate.js. 
+// Once you restart the bot and check the dashboard, DELETE this block.
+
+setTimeout(async () => {
+    try {
+        // Automatically uses the client instance attached to your bot
+        if (typeof client !== 'undefined') {
+            const cfg = await getLevelingConfig(client, '1362454274499547187');
+            if (cfg) {
+                cfg.ignoredChannels = []; 
+                await saveLevelingConfig(client, '1362454274499547187', cfg);
+                console.log("=== SUCCESS: Dashboard channel list has been completely reset to empty! ===");
+            }
+        }
+    } catch (err) {
+        // Silently catch if client isn't globally declared yet; fallback to manual trigger
+    }
+}, 5000); // Runs 5 seconds after the bot boots up
