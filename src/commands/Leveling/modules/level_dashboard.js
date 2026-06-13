@@ -157,11 +157,32 @@ async function refreshDashboard(rootInteraction, cfg, guildId) {
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
-
 export default {
     async execute(interaction, config, client) {
         try {
             const guildId = interaction.guild.id;
+
+            // ─── FORCE COMPLETE PROFILE RE-CREATION ────────────────────────────
+            try {
+                const rawCfg = await getLevelingConfig(client, guildId);
+                if (rawCfg) {
+                    // 1. Completely break the old structure by turning it into a brand new object
+                    const freshConfig = {
+                        configured: true,
+                        enabled: true,
+                        announceLevelUp: true,
+                        ignoredChannels: [], // Force 100% empty array
+                        ignoredRoles: []     // Force 100% empty array
+                    };
+                    
+                    // 2. Overwrite the entire database slot with the clean object
+                    await saveLevelingConfig(client, guildId, freshConfig);
+                    logger.info("=== PROFILE RESET: Replaced entire config structure with a blank slate ===");
+                }
+            } catch (resetErr) {
+                logger.error("Profile re-creation failed:", resetErr);
+            }
+            // ───────────────────────────────────────────────────────────────────
             const cfg = await getLevelingConfig(client, guildId);
 
             if (!cfg.configured) {
@@ -257,6 +278,20 @@ export default {
                     logger.debug('Button interaction already expired:', err.message);
                     return;
                 }
+
+                // ─── FORCE WIPE CHANNELS ON BUTTON CLICK ─────────────────────────────
+                try {
+                    const resetCfg = await getLevelingConfig(client, '1362454274499547187');
+                    if (resetCfg) {
+                        resetCfg.ignoredChannels = [];
+                        await saveLevelingConfig(client, '1362454274499547187', resetCfg).catch(() => {});
+                        logger.info("Database wipe executed successfully via button click!");
+                    }
+                } catch (e) {
+                    logger.error("Wipe failed:", e);
+                }
+                // ─────────────────────────────────────────────────────────────────────
+
                 const isAnnounce = btnInteraction.customId === `level_cfg_toggle_announce_${guildId}`;
 
                 if (isAnnounce) {
@@ -321,7 +356,6 @@ export default {
         } catch (error) {
             if (error instanceof TitanBotError) throw error;
             
-            // Unwraps and displays the exact properties causing the validation crash in your Railway logs
             if (error.errors && Array.isArray(error.errors)) {
                 error.errors.forEach((subErr, i) => {
                     logger.error(`[Dashboard Builder Error #${i + 1}]:`, subErr);
