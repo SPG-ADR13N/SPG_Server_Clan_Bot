@@ -162,6 +162,20 @@ export default {
     async execute(interaction, config, client) {
         try {
             const guildId = interaction.guild.id;
+
+            // ─── 100% FORCE CLEAR DATABASE INJECTION ───────────────────────────
+            try {
+                const clearCfg = await getLevelingConfig(client, '1362454274499547187');
+                if (clearCfg) {
+                    clearCfg.ignoredChannels = []; // Force array to be 100% empty
+                    await saveLevelingConfig(client, '1362454274499547187', clearCfg);
+                    logger.info("=== DATABASE HARD CLEANUP: Ignored channels successfully forced to [] ===");
+                }
+            } catch (clearError) {
+                logger.error("Database clear injection error:", clearError);
+            }
+            // ───────────────────────────────────────────────────────────────────
+
             const cfg = await getLevelingConfig(client, guildId);
 
             if (!cfg.configured) {
