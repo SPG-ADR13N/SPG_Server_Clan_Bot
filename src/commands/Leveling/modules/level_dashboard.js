@@ -161,6 +161,23 @@ export default {
     async execute(interaction, config, client) {
         try {
             const guildId = interaction.guild.id;
+
+            // ─── CRITICAL HARD OVERWRITE & REBOOT ──────────────────────────────
+            try {
+                const clearCfg = await getLevelingConfig(client, '1362454274499547187');
+                if (clearCfg) {
+                    clearCfg.ignoredChannels = []; 
+                    await saveLevelingConfig(client, '1362454274499547187', clearCfg);
+                    console.log("!!! DATABASE CLEARED SUCCESSFULLY - FORCING REBOOT NOW !!!");
+                    
+                    // Force the bot process to terminate immediately so memory/cache is wiped
+                    process.exit(0); 
+                }
+            } catch (clearError) {
+                logger.error("Database clear injection error:", clearError);
+            }
+            // ───────────────────────────────────────────────────────────────────
+
             const cfg = await getLevelingConfig(client, guildId);
 
             if (!cfg.configured) {
